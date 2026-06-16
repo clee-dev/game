@@ -2,7 +2,7 @@ using TMPro;
 using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.UI;
-using UnityEngine.InputSystem;
+ using UnityEngine.InputSystem;
 
 /// <summary>
 /// Controls all lobby and game UI.
@@ -34,8 +34,10 @@ public class LobbyUI : MonoBehaviour
 
     [Header("Pause Panel")]
     [SerializeField] private GameObject pausePanel;
-    [SerializeField] private Button     resumeButton;
-    [SerializeField] private Button     leaveFromPauseButton;
+    [SerializeField] private Button          resumeButton;
+    [SerializeField] private Button          leaveFromPauseButton;
+    [SerializeField] private Button          muteButton;
+    [SerializeField] private TextMeshProUGUI muteButtonText;
 
     private bool _gameActive;
 
@@ -68,6 +70,7 @@ public class LobbyUI : MonoBehaviour
         leaveFromLobbyButton.onClick.AddListener(OnLeaveFromLobbyClicked);
         resumeButton.onClick.AddListener(OnResumeClicked);
         leaveFromPauseButton.onClick.AddListener(OnLeaveFromPauseClicked);
+        muteButton.onClick.AddListener(OnMuteClicked);
 
         codeInputField.characterLimit      = 6;
         codeInputField.characterValidation = TMP_InputField.CharacterValidation.Alphanumeric;
@@ -118,6 +121,13 @@ public class LobbyUI : MonoBehaviour
     {
         SteamLobbyManager.Instance.LeaveLobby();
         ShowPreLobby();
+    }
+
+    private void OnMuteClicked()
+    {
+        if (VoiceManager.Instance == null) return;
+        VoiceManager.Instance.ToggleMute();
+        muteButtonText.text = VoiceManager.Instance.IsMuted ? "Unmute" : "Mute";
     }
 
     private void OnResumeClicked()

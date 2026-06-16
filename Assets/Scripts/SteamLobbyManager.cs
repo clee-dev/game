@@ -38,6 +38,9 @@ public class SteamLobbyManager : MonoBehaviour
 
     private Lobby _currentLobby;
 
+    /// <summary>Room code for the current lobby. Used by VoiceManager to name the Vivox channel.</summary>
+    public string CurrentRoomCode => _currentLobby.Id.IsValid ? _currentLobby.GetData(CODE_KEY) : string.Empty;
+
     private void Awake()
     {
         if (Instance != null) { Destroy(gameObject); return; }
