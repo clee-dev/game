@@ -113,20 +113,7 @@ public class StartingAreaTrigger : NetworkBehaviour
         _countdown.Value    = 0f;
         _countdownCoroutine = null;
 
-        LockAllPlayersRpc();
         NetworkManager.Singleton.SceneManager.LoadScene(miniGameSceneName, LoadSceneMode.Single);
-    }
-
-    // -------------------------------------------------------------------------
-    // RPCs
-    // -------------------------------------------------------------------------
-
-    /// <summary>Broadcast to all clients to lock their local player's spawn toggle.</summary>
-    [Rpc(SendTo.ClientsAndHost)]
-    private void LockAllPlayersRpc()
-    {
-        foreach (var p in HubPlayerState.All)
-            p.Lock();
     }
 
     // -------------------------------------------------------------------------

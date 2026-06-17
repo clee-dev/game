@@ -16,6 +16,7 @@ GameObject:
   - component: {fileID: 5325470756845685272}
   - component: {fileID: 5074844630771936822}
   - component: {fileID: 3911690637486458895}
+  - component: {fileID: 8121109821628310389}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -199,6 +200,26 @@ MonoBehaviour:
   holdPoint: {fileID: 8354125214039120472}
   pickupRange: 3
   throwForce: 8
+--- !u!114 &8121109821628310389
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1351237985740260867}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0a02116e01229a248ac9f1102033c4ab, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::HubPlayerState
+  ShowTopMostFoldoutHeaderGroup: 1
+  visuals: {fileID: 4804463626512524154}
+  characterController: {fileID: 6547845995429739131}
+  playerController: {fileID: 4165502557006134689}
+  playerCamera: {fileID: 4271986051621054946}
+  camera: {fileID: 5451394608381476393}
+  holdDuration: 0.8
+  offscreenPosition: {x: 0, y: -200, z: 0}
 --- !u!1 &1401656716224589918
 GameObject:
   m_ObjectHideFlags: 0

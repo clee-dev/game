@@ -54,6 +54,9 @@ public class MainMenuUI : MonoBehaviour
     [SerializeField] private Button          backFromJoinButton;
     [SerializeField] private TextMeshProUGUI joinErrorText;
 
+    [Header("Options Panel")]
+    [SerializeField] private Button backFromOptionsButton;
+
     [Header("Shared")]
     [SerializeField] private TextMeshProUGUI statusText;
 
@@ -99,6 +102,10 @@ public class MainMenuUI : MonoBehaviour
         codeInput.characterValidation = TMP_InputField.CharacterValidation.Alphanumeric;
         joinConfirmButton.onClick.AddListener(OnJoinClicked);
         backFromJoinButton.onClick.AddListener(() => ShowPanel(mainPanel));
+
+        // Options panel
+        if (backFromOptionsButton != null)
+            backFromOptionsButton.onClick.AddListener(() => ShowPanel(mainPanel));
 
         // Lobby events
         SteamLobbyManager.OnLobbyCreated += OnLobbyCreated;

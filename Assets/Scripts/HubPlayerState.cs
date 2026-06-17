@@ -1,34 +1,26 @@
 using System.Collections.Generic;
 using Unity.Netcode;
 using UnityEngine;
-using UnityEngine.InputSystem;
 
 /// <summary>
 /// Add to the player prefab.
-/// Tracks whether this player has physically spawned into the hub.
-///
-/// Hold E (keyboard) for 0.8s to toggle in or out.
-/// When not spawned in: player is offscreen, invisible, no input.
-/// When spawned in: player teleports to a hub spawn point and can move freely.
-///
-/// All connected players start unspawned. The mini-game starts only once
-/// all spawned-in players enter the starting area.
+/// When a player connects to the hub, they are automatically spawned in at a spawn point.
+/// Visuals, movement, and camera are enabled immediately for the local player.
+/// GameEvents.FireGameStarted() is called so mouse look activates.
 /// </summary>
 [RequireComponent(typeof(CharacterController))]
 public class HubPlayerState : NetworkBehaviour
 {
-    /// <summary>All active HubPlayerState instances in the current scene.</summary>
     public static readonly List<HubPlayerState> All = new();
 
     [Header("References -- assign in Inspector")]
-    [SerializeField] private GameObject      visuals;           // Character mesh root to show/hide
+    [SerializeField] private GameObject          visuals;
     [SerializeField] private CharacterController characterController;
-    [SerializeField] private PlayerController playerController;
-    [SerializeField] private PlayerCamera     playerCamera;
-    [SerializeField] private Camera           camera;
+    [SerializeField] private PlayerController    playerController;
+    [SerializeField] private PlayerCamera        playerCamera;
+    [SerializeField] private Camera              cam;
 
     [Header("Settings")]
-    [SerializeField] private float   holdDuration     = 0.8f;
     [SerializeField] private Vector3 offscreenPosition = new(0, -200, 0);
 
     private readonly NetworkVariable<bool> _isSpawnedIn = new(
@@ -39,22 +31,30 @@ public class HubPlayerState : NetworkBehaviour
 
     public bool IsSpawnedIn => _isSpawnedIn.Value;
 
-    private float _holdTimer;
-    private bool  _toggled;  // prevents double-toggle on a single hold
-    private bool  _locked;   // set true when mini-game starts
-
-    // -------------------------------------------------------------------------
-    // Network lifecycle
-    // -------------------------------------------------------------------------
-
     public override void OnNetworkSpawn()
     {
         All.Add(this);
         _isSpawnedIn.OnValueChanged += (_, val) => ApplySpawnState(val);
 
-        // Start offscreen on all clients
-        transform.position = offscreenPosition;
-        ApplySpawnState(false);
+        // Only move offscreen if not already spawned in.
+        // Joining clients receive the current NetworkVariable value in the spawn message,
+        // so _isSpawnedIn may already be true for existing players -- don't overwrite their position.
+        if (!_isSpawnedIn.Value)
+            transform.position = offscreenPosition;
+
+        if (IsServer)
+        {
+            Vector3 spawnPos = HubSpawnPoints.Instance != null
+                ? HubSpawnPoints.Instance.GetSpawnPoint()
+                : Vector3.zero;
+
+            TeleportToRpc(spawnPos);
+            _isSpawnedIn.Value = true;
+        }
+
+        // Apply current state now -- OnValueChanged won't fire for values
+        // received at join time since the value didn't change from the client's perspective.
+        ApplySpawnState(_isSpawnedIn.Value);
     }
 
     public override void OnNetworkDespawn()
@@ -63,60 +63,6 @@ public class HubPlayerState : NetworkBehaviour
         _isSpawnedIn.OnValueChanged -= (_, val) => ApplySpawnState(val);
     }
 
-    // -------------------------------------------------------------------------
-    // Input (owner only)
-    // -------------------------------------------------------------------------
-
-    private void Update()
-    {
-        if (!IsOwner || _locked) return;
-
-        bool holding = Keyboard.current?.eKey.isPressed ?? false;
-
-        if (holding)
-        {
-            _holdTimer += Time.deltaTime;
-
-            if (_holdTimer >= holdDuration && !_toggled)
-            {
-                _toggled = true;
-                ToggleSpawnRpc();
-            }
-        }
-        else
-        {
-            _holdTimer = 0f;
-            _toggled   = false;
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // RPCs
-    // -------------------------------------------------------------------------
-
-    [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
-    private void ToggleSpawnRpc()
-    {
-        if (_locked) return;
-
-        bool spawning = !_isSpawnedIn.Value;
-        _isSpawnedIn.Value = spawning;
-
-        if (spawning)
-        {
-            Vector3 spawnPos = HubSpawnPoints.Instance != null
-                ? HubSpawnPoints.Instance.GetSpawnPoint()
-                : Vector3.zero;
-
-            TeleportToRpc(spawnPos);
-        }
-        else
-        {
-            TeleportToRpc(offscreenPosition);
-        }
-    }
-
-    /// <summary>Server tells the owner where to move their character controller.</summary>
     [Rpc(SendTo.Owner)]
     private void TeleportToRpc(Vector3 position)
     {
@@ -125,24 +71,14 @@ public class HubPlayerState : NetworkBehaviour
         characterController.enabled = true;
     }
 
-    // -------------------------------------------------------------------------
-    // State application (runs on all clients when NetworkVariable changes)
-    // -------------------------------------------------------------------------
-
     private void ApplySpawnState(bool spawned)
     {
-        if (visuals       != null) visuals.SetActive(spawned);
+        if (visuals          != null) visuals.SetActive(spawned);
         if (playerController != null) playerController.enabled = spawned && IsOwner;
         if (playerCamera     != null) playerCamera.enabled     = spawned && IsOwner;
-        if (camera           != null) camera.enabled           = spawned && IsOwner;
-    }
+        if (cam              != null) cam.enabled              = spawned && IsOwner;
 
-    // -------------------------------------------------------------------------
-    // Lock (called when mini-game starts)
-    // -------------------------------------------------------------------------
-
-    public void Lock()
-    {
-        _locked = true;
+        if (spawned && IsOwner)
+            GameEvents.FireGameStarted();
     }
 }
