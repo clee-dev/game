@@ -1,3 +1,4 @@
+using System;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -22,6 +23,9 @@ public class PhysicsPickup : NetworkBehaviour
 
     public bool IsHeld => _isHeld.Value;
 
+    /// <summary>Fires on every machine whenever the held state changes (true = now held).</summary>
+    public event Action<bool> HeldStateChanged;
+
     private void Awake()
     {
         _rb = GetComponent<Rigidbody>();
@@ -45,6 +49,18 @@ public class PhysicsPickup : NetworkBehaviour
         // Kinematic while held so physics doesn't fight the hold position.
         // Non-kinematic when free so physics runs normally.
         _rb.isKinematic = isNowHeld;
+        HeldStateChanged?.Invoke(isNowHeld);
+    }
+
+    /// <summary>
+    /// Server-only. Lets a layered system (e.g. MaterialItem) lock this object out of
+    /// being picked up again without going through the normal pickup/drop RPC flow --
+    /// used while a material is sitting in the Placed state on a build tile.
+    /// </summary>
+    public void SetHeldServer(bool held)
+    {
+        if (!IsServer) return;
+        _isHeld.Value = held;
     }
 
     // -------------------------------------------------------------------------

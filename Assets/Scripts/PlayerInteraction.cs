@@ -1,24 +1,32 @@
+using TMPro;
 using Unity.Netcode;
 using UnityEngine;
 
 /// <summary>
-/// Handles physics object pickup and throwing for the local player.
-/// Add to the Player prefab alongside PlayerController.
+/// Handles all "look at and press E" interaction for the local player: picking up
+/// loose items, placing a held material on a compatible build tile, hold-to-build
+/// when holding the matching tool, and dropping/throwing. Add to the Player prefab
+/// alongside PlayerController.
 ///
 /// Requires a HoldPoint child Transform on the camera:
 ///   Main Camera
 ///   └── HoldPoint (local position: 0, -0.2, 1.5)
+///
+/// Targeting is a single forward raycast from playerCamera (Systems Architecture,
+/// Section 4.2) -- replaces the old OverlapSphere "nearest in range" pickup.
 ///
 /// Only runs logic for the local owner. Remote players' components are inactive.
 /// </summary>
 public class PlayerInteraction : NetworkBehaviour
 {
     [Header("References")]
-    [SerializeField] private Transform holdPoint;  // Child of camera, where held object sits
+    [SerializeField] private Camera          playerCamera;
+    [SerializeField] private Transform       holdPoint;      // Child of camera, where held object sits
+    [SerializeField] private TextMeshProUGUI interactPrompt; // optional, screen-space
 
     [Header("Settings")]
-    [SerializeField] private float pickupRange = 3f;
-    [SerializeField] private float throwForce  = 8f;
+    [SerializeField] private float interactRange = 2.5f;
+    [SerializeField] private float throwForce    = 8f;
 
     private InputReader   _input;
     private PhysicsPickup _heldObject;
@@ -33,7 +41,17 @@ public class PlayerInteraction : NetworkBehaviour
         if (!IsOwner) return;
 
         MoveHeldObject();
-        HandleInteractInput();
+
+        Physics.Raycast(new Ray(playerCamera.transform.position, playerCamera.transform.forward),
+            out RaycastHit hit, interactRange);
+        Collider hitCollider = hit.collider;
+
+        BuildTile     tileTarget   = hitCollider != null ? hitCollider.GetComponentInParent<BuildTile>()    : null;
+        PhysicsPickup pickupTarget = hitCollider != null ? hitCollider.GetComponentInParent<PhysicsPickup>() : null;
+
+        UpdatePrompt(tileTarget);
+        HandleContinuousBuild(tileTarget);
+        HandleInteractPress(tileTarget, pickupTarget);
     }
 
     // -------------------------------------------------------------------------
@@ -49,47 +67,58 @@ public class PlayerInteraction : NetworkBehaviour
         _heldObject.transform.SetPositionAndRotation(holdPoint.position, holdPoint.rotation);
     }
 
-    private void HandleInteractInput()
+    // -------------------------------------------------------------------------
+    // Continuous hold-to-build (Section 6.2, step 3)
+    // -------------------------------------------------------------------------
+
+    private void HandleContinuousBuild(BuildTile target)
+    {
+        if (target == null || !_input.InteractHeld) return;
+
+        var tool = _heldObject != null ? _heldObject.GetComponent<ToolItem>() : null;
+        if (tool == null || !target.CanBuild(tool.Type)) return;
+
+        target.ContinueBuildRpc(OwnerClientId, tool.Type);
+    }
+
+    // -------------------------------------------------------------------------
+    // Single press: pick up / place / drop
+    // -------------------------------------------------------------------------
+
+    private void HandleInteractPress(BuildTile tileTarget, PhysicsPickup pickupTarget)
     {
         if (!_input.InteractPressed) return;
         _input.ConsumeInteract();
 
-        if (_heldObject != null)
-            Drop();
-        else
-            TryPickup();
-    }
-
-    // -------------------------------------------------------------------------
-    // Pickup / Drop
-    // -------------------------------------------------------------------------
-
-    private void TryPickup()
-    {
-        // Find all colliders in pickup range
-        var colliders = Physics.OverlapSphere(transform.position, pickupRange);
-
-        PhysicsPickup closest     = null;
-        float         closestDist = float.MaxValue;
-
-        foreach (var col in colliders)
+        if (_heldObject == null)
         {
-            var pickup = col.GetComponent<PhysicsPickup>();
-            if (pickup == null)  continue;  // not a pickupable object
-            if (pickup.IsHeld)   continue;  // already held by someone
-
-            float dist = Vector3.Distance(transform.position, col.transform.position);
-            if (dist >= closestDist) continue;
-
-            closestDist = dist;
-            closest     = pickup;
+            TryPickup(pickupTarget);
+            return;
         }
 
-        if (closest == null) return;
+        var material = _heldObject.GetComponent<MaterialItem>();
+        if (material != null && tileTarget != null && tileTarget.CanAcceptMaterial(material.Type))
+        {
+            PlaceHeldMaterial(tileTarget);
+            return;
+        }
+
+        Drop();
+    }
+
+    private void TryPickup(PhysicsPickup pickupTarget)
+    {
+        if (pickupTarget == null || pickupTarget.IsHeld) return;
 
         // Request ownership transfer from the host
-        closest.RequestPickupServerRpc(OwnerClientId);
-        _heldObject = closest;
+        pickupTarget.RequestPickupServerRpc(OwnerClientId);
+        _heldObject = pickupTarget;
+    }
+
+    private void PlaceHeldMaterial(BuildTile target)
+    {
+        target.PlaceMaterialRpc(_heldObject.NetworkObject);
+        _heldObject = null;
     }
 
     private void Drop()
@@ -97,10 +126,38 @@ public class PlayerInteraction : NetworkBehaviour
         if (_heldObject == null) return;
 
         // Throw in the direction the camera is facing
-        Vector3 throwVelocity = Camera.main.transform.forward * throwForce;
+        Vector3 throwVelocity = playerCamera.transform.forward * throwForce;
 
         _heldObject.RequestDropServerRpc(throwVelocity);
         _heldObject = null;
+    }
+
+    // -------------------------------------------------------------------------
+    // Prompt
+    // -------------------------------------------------------------------------
+
+    private void UpdatePrompt(BuildTile target)
+    {
+        if (interactPrompt == null) return;
+
+        if (target != null && _heldObject != null)
+        {
+            var material = _heldObject.GetComponent<MaterialItem>();
+            if (material != null && target.CanAcceptMaterial(material.Type))
+            {
+                interactPrompt.text = "[E] Place Material";
+                return;
+            }
+
+            var tool = _heldObject.GetComponent<ToolItem>();
+            if (tool != null && target.CanBuild(tool.Type))
+            {
+                interactPrompt.text = "[E] Hold to Build";
+                return;
+            }
+        }
+
+        interactPrompt.text = _heldObject != null ? "[E] Drop" : "";
     }
 
     // -------------------------------------------------------------------------

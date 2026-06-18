@@ -14,6 +14,7 @@ public class InputReader : MonoBehaviour
     public bool    IsSprinting   { get; private set; }
     public bool    JumpPressed   { get; private set; }
     public bool    InteractPressed { get; private set; }
+    public bool    InteractHeld  { get; private set; } // for hold-to-build, unlike InteractPressed this isn't consumed
 
     private void Awake()
     {
@@ -36,9 +37,10 @@ public class InputReader : MonoBehaviour
 
     private void Update()
     {
-        MoveInput   = _actions.Player.Move.ReadValue<Vector2>();
-        LookInput   = _actions.Player.Look.ReadValue<Vector2>();
-        IsSprinting = _actions.Player.Sprint.IsPressed();
+        MoveInput    = _actions.Player.Move.ReadValue<Vector2>();
+        LookInput    = _actions.Player.Look.ReadValue<Vector2>();
+        IsSprinting  = _actions.Player.Sprint.IsPressed();
+        InteractHeld = _actions.Player.Interact.IsPressed();
     }
 
     private void OnJump(InputAction.CallbackContext ctx)     => JumpPressed    = true;
