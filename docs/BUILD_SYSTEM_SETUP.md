@@ -43,8 +43,31 @@ are spawned at `gridPosition * CellSize`, and `BuildTile` recovers its grid coor
   - `placedMaterialVisual` → child object toggled on when state is `MaterialPlaced`
   - `builtVisual` → child object toggled on when state is `Built`
   - `eligibleColor` / `ineligibleColor` → tint for the ghost (defaults are fine to start)
-  - `progressBarRoot` + `progressFill` → optional world-space canvas above the tile;
-    `progressFill` should be a `RectTransform` that the script scales 0→1 on X
+  - `progressBarRoot` + `progressFill` → a small world-space canvas above the tile,
+    built from **three separate objects**. Do not point either field at the Canvas's
+    own RectTransform — that's the mistake that makes the bar flash full-screen
+    instead of showing as a small bar over the tile:
+    1. A child `Canvas` (e.g. "ProgressCanvas"). Render Mode **must be `World Space`**,
+       not the default `Screen Space - Overlay` — Overlay ignores the object's
+       transform and auto-sizes its rect to the screen resolution, so toggling it on
+       lights up the whole screen instead of a small bar above the tile. Position it
+       above the tile, e.g. local position `(0, 2, 0)`. No `GraphicRaycaster` needed,
+       nothing on it is clickable. Set its `RectTransform` width/height to something
+       tile-sized (e.g. width `1`, height `0.25`) while leaving scale at `(1,1,1)`,
+       rather than leaving Unity's default `100×100` and compensating with a tiny
+       scale factor.
+    2. A child `Image` under the canvas (e.g. "Background") stretched to fill that
+       rect (`anchorMin (0,0)`, `anchorMax (1,1)`), dark/grey — just the bar's
+       outline/backdrop, not wired to any script field.
+    3. A second child `Image` (e.g. "Fill"), anchored to the **left edge** —
+       `anchorMin (0,0)`, `anchorMax (0,1)`, **pivot `(0, 0.5)`** — sized to match the
+       background's full width via its `sizeDelta`. The left pivot matters: the
+       script scales this object's `localScale.x` from 0→1
+       (`BuildTile.UpdateProgressBar`), and with a left pivot it grows rightward like
+       a normal progress bar instead of expanding from the center.
+    - Assign `progressBarRoot` → the **ProgressCanvas** GameObject itself (the whole
+      canvas toggles on/off — disabled canvases cost ~nothing). Assign
+      `progressFill` → the **Fill** object's `RectTransform`, not the canvas's own.
 
 You can leave the visuals as simple grey cubes for now — none of the gameplay logic
 depends on what they look like, only on the field references being non-null.
