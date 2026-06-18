@@ -6,12 +6,13 @@ done — this file is the permanent summary that replaces them.
 
 ## 2026-06-18
 
-- **Order menu: mouse unlock + clickable buttons (in progress).** `PlayerCamera` gained
+- **Order menu: mouse unlock + clickable buttons (done).** `PlayerCamera` gained
   `SetLookEnabled(bool)`; `PlayerInteraction` calls it when the order menu opens/closes
   and now exposes `SelectOrderOption(int)` / `CloseOrderMenu()` / `IsOrderMenuOpen` /
   `OpenOrderMenuTarget` for UI Buttons to call alongside the existing number-key
-  selection. Editor wiring (Canvas/Buttons/EventSystem) tracked in `CURRENT_WORK.md`
-  until done.
+  selection. `OrderMenuPanel` toggles the menu panel's active state from the always-on
+  `Canvas` object (a disabled GameObject can't poll its own visibility, so this can't
+  live on the panel itself). Wired and tested working in-game.
 - **Ordering system: multi-material picker + serialization fix.** `OrderQueueSystem`'s
   `OrderEntry` now implements `INetworkSerializeByMemcpy`, fixing a runtime
   `ArgumentException` from `NetworkList<OrderEntry>` having no registered serializer.

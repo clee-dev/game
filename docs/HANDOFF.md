@@ -33,6 +33,9 @@ with `E` and either press number keys (1-9, unchanged) or click buttons with the
 **Furniture/Decor tile split** — `TileType.Furniture` (ground, needs tile below built)
 vs `TileType.Decor` (wall-mounted, needs adjacent built tile) replace one ambiguous type.
 
+**Order menu UI is fully wired and tested working in-game** (cursor unlock, clickable
+buttons, Back button closes the menu, panel shows/hides correctly).
+
 ## Known follow-ups not yet done (low priority, flagged not fixed)
 
 1. **`OrderMenuPanel` polls every frame instead of using an event.** Works fine
@@ -40,11 +43,7 @@ vs `TileType.Decor` (wall-mounted, needs adjacent built tile) replace one ambigu
    event (extend `GameEvents`, or a local C# event) that `OrderMenuPanel` subscribes to
    in `OnEnable`/unsubscribes in `OnDisable`, instead of checking in `Update()`. Flagged
    for a later audit pass, not blocking.
-2. **"Back" button on the order menu currently calls `SelectOrderOption(3)`** instead of
-   `CloseOrderMenu()` — index 3 is out of bounds (`availableMaterials` only has Wood at
-   index 0), so it silently no-ops. Should be rewired in the Editor to call
-   `PlayerInteraction.CloseOrderMenu()` with no argument instead.
-3. **"Concrete" and "Steel" order buttons are wired to indices 1 and 2** but no material
+2. **"Concrete" and "Steel" order buttons are wired to indices 1 and 2** but no material
    prefabs exist yet for those types (only `WoodPlank.prefab`; `MaterialType.Concrete`/
    `Steel` are defined enum values with nothing built on them). Not a bug — just
    unfinished content. Buttons will start working once those prefabs exist and get added
