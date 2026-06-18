@@ -64,3 +64,38 @@ tested — permanent history goes in `docs/CHANGELOG.md` instead.
   cursor.
 
 Once this is wired and tested, tell me and I'll remove this file.
+
+## Update — diagnosed "no menu UI shows" (2026-06-18)
+
+Checked your committed `Player.prefab`/`Game1.unity` object-by-object. Good news: the
+`EventSystem`, the Canvas parenting, the `mouseLook`/`interactPrompt` fields, and all four
+buttons' `OnClick → PlayerInteraction.SelectOrderOption` targets are all wired correctly.
+Two real issues found:
+
+1. **Root cause of "no menu UI at all": `menuUI` panel starts inactive and nothing turns
+   it on.** You built `menuUI` correctly as a child of the existing `Canvas`, starting
+   disabled like step 4 said to — but step 4 also called for "a small script polling
+   `IsOrderMenuOpen`" to flip it on, and that script never got added. A disabled
+   GameObject's own `Update()` never runs, so it can't be the one watching itself —
+   something else has to flip it. I added `Assets/Scripts/OrderMenuPanel.cs` to do this:
+   - **Attach it to `Player.prefab`'s `Canvas` object** (same object that hosts
+     `InteractPrompt` and `menuUI` — it's always active, so its `Update()` always runs).
+   - Assign `playerInteraction` → drag the prefab's root `Player` object.
+   - Assign `panel` → drag the `menuUI` child object.
+
+2. **Secondary bug, once the panel is visible: only the "Wood" button will actually
+   place an order.** Your four buttons call `SelectOrderOption` with int arguments
+   `Wood=0, Concrete=1, Steel=2, Back=3`, but `OrderStation.prefab`'s `availableMaterials`
+   array currently only has one entry (Wood, index 0). `PlaceOrderRpc`'s bounds check
+   silently no-ops anything out of range, so Concrete/Steel/Back clicks will do nothing.
+   - **"Back" almost certainly shouldn't call `SelectOrderOption(3)` at all** — rewire its
+     `OnClick` to `PlayerInteraction.CloseOrderMenu()` instead (no argument), since it
+     reads as a cancel button, not a 4th material.
+   - **Concrete/Steel have no material prefab yet** (only `WoodPlank.prefab` exists, even
+     though `MaterialType.Concrete`/`Steel` are defined enum values) — those buttons will
+     stay no-ops until you create those material prefabs and add them to
+     `OrderStation.availableMaterials` at indices 1 and 2. Not a bug, just unfinished
+     content — fine to leave the buttons in place until then.
+
+Re-test once `OrderMenuPanel` is wired: opening the menu should now show the panel, and
+clicking "Wood" should place the order and close it.
