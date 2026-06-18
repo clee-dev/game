@@ -18,6 +18,7 @@ public class ToolDepotSpawner : MonoBehaviour
     [SerializeField] private float respawnCooldown = 5f;
 
     private ToolItem _current;
+    private PhysicsPickup _currentPickup;
 
     private void Start() => SpawnOne();
 
@@ -25,9 +26,10 @@ public class ToolDepotSpawner : MonoBehaviour
     {
         if (_current == null) return;
 
-        if (_current.GetComponent<PhysicsPickup>().IsHeld)
+        if (_currentPickup.IsHeld)
         {
             _current = null;
+            _currentPickup = null;
             Invoke(nameof(SpawnOne), respawnCooldown);
         }
     }
@@ -37,5 +39,6 @@ public class ToolDepotSpawner : MonoBehaviour
         var instance = Instantiate(toolPrefab, transform.position, Quaternion.identity);
         instance.GetComponent<NetworkObject>().Spawn();
         _current = instance;
+        _currentPickup = instance.GetComponent<PhysicsPickup>();
     }
 }
