@@ -14,8 +14,9 @@ using UnityEngine;
 /// Setup: NetworkObject (registered in the NetworkManager's prefab list), a Collider for
 /// PlayerInteraction's raycast to hit, this script with materialPrefab assigned (the
 /// WoodPlank prefab for the MVP). deliveryPoint is optional -- leave it unassigned to have
-/// deliveries land on the station itself, or point it at a separate supply zone Transform
-/// per the design doc's "targetSupplyZone" field.
+/// deliveries land at the SupplyZoneSpawner in the scene whose materialPrefab matches this
+/// station's (the design doc's "targetSupplyZone" field), or assign a Transform here to
+/// override that and send deliveries somewhere else entirely.
 ///
 /// The portable/carryable order station (shop upgrade, "iPad item") described in the
 /// design doc isn't implemented -- there's no shop system yet to unlock it from.
@@ -37,7 +38,19 @@ public class OrderStation : NetworkBehaviour
     [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
     public void PlaceOrderRpc()
     {
-        Vector3 position = deliveryPoint != null ? deliveryPoint.position : transform.position;
-        OrderQueueSystem.Instance.TryPlaceOrder(materialPrefab, orderQuantity, position);
+        OrderQueueSystem.Instance.TryPlaceOrder(materialPrefab, orderQuantity, ResolveDeliveryPosition());
+    }
+
+    private Vector3 ResolveDeliveryPosition()
+    {
+        if (deliveryPoint != null) return deliveryPoint.position;
+
+        foreach (var zone in SupplyZoneSpawner.All)
+            if (zone.MaterialType == materialPrefab.Type)
+                return zone.transform.position;
+
+        // No matching supply zone in the scene -- fall back to the station itself
+        // rather than silently dropping the order.
+        return transform.position;
     }
 }

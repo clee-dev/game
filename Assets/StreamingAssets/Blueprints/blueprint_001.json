@@ -27,7 +27,9 @@
     { "id": "supply_wood_0", "worldPosition": { "x": 4.5, "y": 0.5, "z": 1 } }
   ],
 
-  "orderStations": [],
+  "orderStations": [
+    { "id": "order_station_0", "worldPosition": { "x": 4.5, "y": 0.5, "z": -1 } }
+  ],
 
   "toolDepots": [
     { "id": "depot_hammer_0", "worldPosition": { "x": -2.5, "y": 0.5, "z": 1 }, "tools": ["hammer"] }

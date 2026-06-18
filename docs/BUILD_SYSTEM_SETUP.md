@@ -101,9 +101,12 @@ A new prefab, for the ordering system (Systems Architecture, Section 5.3):
     SupplyZoneSpawner/ToolDepotSpawner — the material type is decided by this prefab's
     field, not read from the blueprint's `orderStations[]` entry)
   - `orderQuantity` → defaults to 3, fine as-is
-  - `deliveryPoint` → optional. Leave unassigned to have orders land on the station
-    itself, or assign a separate child/Transform elsewhere to match the design doc's
-    "targetSupplyZone" concept (e.g. a delivery point closer to the build site)
+  - `deliveryPoint` → optional. Leave unassigned to have orders delivered to whichever
+    `SupplyZoneSpawner` in the scene spawns the same material type (the design doc's
+    "targetSupplyZone" concept) — this is resolved automatically via
+    `SupplyZoneSpawner.All` at delivery time, no manual link needed between the two.
+    Only assign a Transform here if you want to override that and send deliveries
+    somewhere else entirely (e.g. a drop point closer to the build site).
 
 ## 2. Register network prefabs
 
@@ -138,9 +141,11 @@ In `Assets/Scenes/Game1.unity`:
 
 `BuildSystem.Start()` only spawns tiles/supply zones when `NetworkManager.Singleton.IsServer`
 is true, so this works correctly for both a dedicated host and a listen-server host.
-`blueprint_001` has no `orderStations` entries, so `OrderQueueSystem` only matters for
-the material cap in that blueprint — no orders will ever be placed against it until a
-blueprint with `orderStations` entries exists.
+`blueprint_001` now has one `orderStations` entry (`order_station_0` at `(4.5, 0.5, -1)`),
+so once `orderStationPrefab` is assigned and registered as a network prefab, one
+`OrderStation` will spawn there automatically on `Start()` — it does **not** spawn just
+from creating the prefab and adding `OrderQueueSystem` to the scene; `BuildSystem` only
+spawns what the current blueprint JSON lists.
 
 ## 4. Wire the Player prefab
 
@@ -234,8 +239,9 @@ Run one host + one client (or two clients against a dedicated server):
 - [ ] Looking at an `OrderStation` and pressing E places an order; it immediately appears
       in the top-right "Incoming Deliveries" list on every connected client with a
       counting-down timer
-- [ ] ~15s after ordering, the ordered quantity of materials spawns at the delivery point
-      (or the station itself if `deliveryPoint` is unassigned) and the queue entry disappears
+- [ ] ~15s after ordering, the ordered quantity of materials spawns at the matching
+      `SupplyZoneSpawner` (or `deliveryPoint`, if one was assigned) and the queue entry
+      disappears
 - [ ] Once enough materials are Loose/Held/Placed in the world to hit `materialCap`, the
       `OrderStation` prompt switches to "Material cap reached" and pressing E does nothing
       until enough materials are built (consumed) or despawned to free up headroom

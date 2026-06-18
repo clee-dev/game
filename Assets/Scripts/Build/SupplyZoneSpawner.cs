@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -16,7 +17,16 @@ public class SupplyZoneSpawner : MonoBehaviour
     [SerializeField] private MaterialItem materialPrefab;
     [SerializeField] private float respawnCooldown = 5f;
 
+    public MaterialType MaterialType => materialPrefab.Type;
+
+    // All live supply zones, server-side only -- lets OrderStation find "the supply
+    // zone for this material type" without any blueprint-level link between the two.
+    public static readonly List<SupplyZoneSpawner> All = new();
+
     private MaterialItem _current;
+
+    private void OnEnable() => All.Add(this);
+    private void OnDisable() => All.Remove(this);
 
     private void Start() => SpawnOne();
 
