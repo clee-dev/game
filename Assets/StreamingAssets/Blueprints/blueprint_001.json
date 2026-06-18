@@ -1,0 +1,51 @@
+{
+  "id": "blueprint_001",
+  "name": "Starter Shed",
+  "description": "A small one-room shed used to validate the MVP build loop: foundation, then floor, then walls and a door. Wood and the hammer only.",
+  "scenery": "hub_yard",
+
+  "gridSize": { "x": 2, "y": 3, "z": 2 },
+
+  "tiles": [
+    { "id": "foundation_0_0_0", "position": { "x": 0, "y": 0, "z": 0 }, "type": "foundation", "requiredMaterial": "wood", "requiredTool": "hammer", "health": 20 },
+    { "id": "foundation_1_0_0", "position": { "x": 1, "y": 0, "z": 0 }, "type": "foundation", "requiredMaterial": "wood", "requiredTool": "hammer", "health": 20 },
+    { "id": "foundation_0_0_1", "position": { "x": 0, "y": 0, "z": 1 }, "type": "foundation", "requiredMaterial": "wood", "requiredTool": "hammer", "health": 20 },
+    { "id": "foundation_1_0_1", "position": { "x": 1, "y": 0, "z": 1 }, "type": "foundation", "requiredMaterial": "wood", "requiredTool": "hammer", "health": 20 },
+
+    { "id": "floor_0_1_0", "position": { "x": 0, "y": 1, "z": 0 }, "type": "floor", "requiredMaterial": "wood", "requiredTool": "hammer", "health": 15 },
+    { "id": "floor_1_1_0", "position": { "x": 1, "y": 1, "z": 0 }, "type": "floor", "requiredMaterial": "wood", "requiredTool": "hammer", "health": 15 },
+    { "id": "floor_0_1_1", "position": { "x": 0, "y": 1, "z": 1 }, "type": "floor", "requiredMaterial": "wood", "requiredTool": "hammer", "health": 15 },
+    { "id": "floor_1_1_1", "position": { "x": 1, "y": 1, "z": 1 }, "type": "floor", "requiredMaterial": "wood", "requiredTool": "hammer", "health": 15 },
+
+    { "id": "wall_0_2_0", "position": { "x": 0, "y": 2, "z": 0 }, "type": "wall", "requiredMaterial": "wood", "requiredTool": "hammer", "health": 25 },
+    { "id": "wall_1_2_0", "position": { "x": 1, "y": 2, "z": 0 }, "type": "wall", "requiredMaterial": "wood", "requiredTool": "hammer", "health": 25 },
+    { "id": "wall_0_2_1", "position": { "x": 0, "y": 2, "z": 1 }, "type": "wall", "requiredMaterial": "wood", "requiredTool": "hammer", "health": 25 },
+    { "id": "door_1_2_1",  "position": { "x": 1, "y": 2, "z": 1 }, "type": "door", "requiredMaterial": "wood", "requiredTool": "hammer", "health": 15 }
+  ],
+
+  "supplyZones": [
+    { "id": "supply_wood_0", "worldPosition": { "x": 4.5, "y": 0.5, "z": 1 } }
+  ],
+
+  "orderStations": [
+    { "id": "order_station_0", "worldPosition": { "x": 4.5, "y": 0.5, "z": -1 } }
+  ],
+
+  "toolDepots": [
+    { "id": "depot_hammer_0", "worldPosition": { "x": -2.5, "y": 0.5, "z": 1 }, "tools": ["hammer"] }
+  ],
+
+  "playerSpawns": [
+    { "x": -3, "y": 1, "z": -3 },
+    { "x": -3, "y": 1, "z": 5 },
+    { "x": 6,  "y": 1, "z": -3 },
+    { "x": 6,  "y": 1, "z": 5 }
+  ],
+
+  "contractDefaults": {
+    "timeLimitSeconds": 600,
+    "allowedMaterials": ["wood"],
+    "completionThresholds": { "full": 1.0, "partial": 0.5 },
+    "basePayout": 100
+  }
+}
