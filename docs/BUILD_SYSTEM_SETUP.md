@@ -4,7 +4,7 @@ Everything in this PR that's pure C# (`Assets/Scripts/Blueprint/`, `Assets/Scrip
 the `PlayerInteraction`/`InputReader`/`PhysicsPickup` edits, `Packages/manifest.json`,
 `Assets/StreamingAssets/Blueprints/blueprint_001.json`) is already done and will compile
 as-is. What's left is Editor-only work that can't be done by hand-editing YAML safely:
-creating 4 prefabs, registering 3 of them as network prefabs, dropping one `BuildSystem`
+creating 5 prefabs, registering 3 of them as network prefabs, dropping one `BuildSystem`
 object into the level scene, and fixing up two fields on the existing `Player` prefab.
 
 Do these in order — each step depends on the previous one existing.
@@ -56,6 +56,16 @@ A plain (non-networked) prefab — no `NetworkObject`:
 - `materialPrefab` → the **WoodPlank** prefab from above
 - `respawnCooldown` → defaults to 5s, fine as-is
 
+### ToolDepotSpawner
+
+Same idea, for tools — a plain (non-networked) prefab, no `NetworkObject`:
+- Just a `GameObject` with the `ToolDepotSpawner` script
+- `toolPrefab` → the **Hammer** prefab from above
+- `respawnCooldown` → defaults to 5s, fine as-is
+
+Like supply zones, the tool type is decided by this prefab's own field, not read from
+the blueprint's `toolDepots[].tools` array — fine for the MVP's single tool.
+
 ## 2. Register network prefabs
 
 Open `Assets/DefaultNetworkPrefabs.asset` (or the NetworkManager's prefab list, same
@@ -64,7 +74,8 @@ thing) and add:
 - `WoodPlank`
 - `Hammer`
 
-`SupplyZoneSpawner` is **not** a `NetworkObject` and must not be added here.
+`SupplyZoneSpawner` and `ToolDepotSpawner` are **not** `NetworkObject`s and must not be
+added here.
 
 ## 3. Add BuildSystem to the level scene
 
@@ -75,6 +86,7 @@ In `Assets/Scenes/Game1.unity`:
 3. Assign:
    - `tilePrefab` → the **BuildTile** prefab
    - `supplyZoneSpawnerPrefab` → the **SupplyZoneSpawner** prefab
+   - `toolDepotSpawnerPrefab` → the **ToolDepotSpawner** prefab
    - `blueprintId` → leave as `blueprint_001` (matches
      `Assets/StreamingAssets/Blueprints/blueprint_001.json`)
 
@@ -109,10 +121,6 @@ WoodPlank/Hammer/BuildTile are **not** marked `Is Trigger`, or the raycast won't
 
 ## 5. Known gaps (not blockers, just not implemented yet)
 
-- **Tool depots**: `blueprint_001.json`'s `toolDepots` entry is schema-faithful data, but
-  `BuildSystem` doesn't spawn anything for it yet. For now, manually place a `Hammer`
-  instance in the scene near `worldPosition: {-2.5, 0.5, 1}` (the depot's position in
-  the blueprint).
 - **Furniture dependency rule**: the three design docs disagree (GDD/Blueprint Schema say
   "adjacent built wall", Systems Architecture's table says "built tile directly below").
   `BuildSystem.IsEligible` currently implements the Systems Architecture version. Flag if
@@ -130,6 +138,8 @@ WoodPlank/Hammer/BuildTile are **not** marked `Is Trigger`, or the raycast won't
 - Tile spacing: tiles are now `CellSize` (2 units) apart instead of 1, see §1 BuildTile
   above. If you already built `blueprint_001`-shaped test geometry by hand for any reason,
   re-pull the latest `blueprint_001.json` so positions match the new spacing.
+- Tool depots now spawn a tool via the new `ToolDepotSpawner` (§1/§3 above), mirroring
+  `SupplyZoneSpawner` — no more manual placement needed.
 
 ## 7. Smoke test checklist
 
@@ -147,5 +157,6 @@ Run one host + one client (or two clients against a dedicated server):
       (ghost color change), and completing a floor/wall makes the door eligible once an
       adjacent wall is built
 - [ ] The supply zone respawns a new plank ~5s after the first one is picked up
+- [ ] The tool depot respawns a new hammer ~5s after the first one is picked up
 - [ ] Dropping/disconnecting while holding an item releases it cleanly (no orphaned
       "stuck-held" object)

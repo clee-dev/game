@@ -13,8 +13,12 @@ using UnityEngine;
 ///
 /// Setup: create an empty GameObject in the level scene (not a NetworkObject -- it
 /// doesn't need to be), add this script, assign tilePrefab (a BuildTile NetworkObject
-/// prefab registered in the NetworkManager's prefab list) and supplyZoneSpawnerPrefab
-/// (a plain, non-networked prefab with SupplyZoneSpawner on it).
+/// prefab registered in the NetworkManager's prefab list), supplyZoneSpawnerPrefab
+/// (a plain, non-networked prefab with SupplyZoneSpawner on it), and
+/// toolDepotSpawnerPrefab (same idea, with ToolDepotSpawner). Like supply zones, which
+/// tool a depot spawns is configured on the prefab itself, not read from the blueprint's
+/// ToolDepotData.tools -- fine for the MVP's single tool (hammer); supporting multiple
+/// distinct depot tool types would need a prefab-per-ToolType lookup instead.
 /// </summary>
 public class BuildSystem : MonoBehaviour
 {
@@ -33,6 +37,7 @@ public class BuildSystem : MonoBehaviour
     [Header("Prefabs")]
     [SerializeField] private BuildTile tilePrefab;
     [SerializeField] private SupplyZoneSpawner supplyZoneSpawnerPrefab;
+    [SerializeField] private ToolDepotSpawner toolDepotSpawnerPrefab;
 
     public BlueprintData CurrentBlueprint { get; private set; }
 
@@ -88,6 +93,9 @@ public class BuildSystem : MonoBehaviour
 
         foreach (SupplyZoneData zone in CurrentBlueprint.supplyZones)
             Instantiate(supplyZoneSpawnerPrefab, zone.worldPosition.ToVector3(), Quaternion.identity);
+
+        foreach (ToolDepotData depot in CurrentBlueprint.toolDepots)
+            Instantiate(toolDepotSpawnerPrefab, depot.worldPosition.ToVector3(), Quaternion.identity);
     }
 
     // -------------------------------------------------------------------------
