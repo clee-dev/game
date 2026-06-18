@@ -5,11 +5,14 @@ using UnityEngine;
 /// <summary>
 /// A single build tile (Systems Architecture, Section 6). One of these is spawned
 /// by BuildSystem per blueprint tile entry, positioned at the tile's grid coordinate
-/// (1 Unity unit == 1 grid cell).
+/// scaled by BuildSystem.CellSize world units per cell.
 ///
 /// Setup for the prefab:
 ///   - NetworkObject (registered in the NetworkManager's prefab list)
-///   - BoxCollider sized to one grid cell -- this is what PlayerInteraction raycasts against
+///   - BoxCollider noticeably smaller than CellSize (e.g. 1.4 units, for a 2-unit
+///     cell) so adjacent tiles leave a gap -- this is what PlayerInteraction
+///     raycasts against, and flush colliders make it hard to aim at one tile
+///     over its neighbor
 ///   - ghostRenderer: a transparent unlit quad/cube shown while Empty
 ///   - placedMaterialVisual / builtVisual: child objects toggled on state change
 ///   - progressBarRoot + progressFill: world-space canvas above the tile (progressFill
@@ -60,7 +63,7 @@ public class BuildTile : NetworkBehaviour
 
     public override void OnNetworkSpawn()
     {
-        GridPosition = Vector3Int.RoundToInt(transform.position);
+        GridPosition = Vector3Int.RoundToInt(transform.position / BuildSystem.CellSize);
 
         TileData data = BuildSystem.Instance.GetTileDataAt(GridPosition);
         if (data == null)

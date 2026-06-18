@@ -24,20 +24,20 @@
   ],
 
   "supplyZones": [
-    { "id": "supply_wood_0", "worldPosition": { "x": 3.5, "y": 0.5, "z": 0.5 } }
+    { "id": "supply_wood_0", "worldPosition": { "x": 4.5, "y": 0.5, "z": 1 } }
   ],
 
   "orderStations": [],
 
   "toolDepots": [
-    { "id": "depot_hammer_0", "worldPosition": { "x": -1.5, "y": 0.5, "z": 0.5 }, "tools": ["hammer"] }
+    { "id": "depot_hammer_0", "worldPosition": { "x": -2.5, "y": 0.5, "z": 1 }, "tools": ["hammer"] }
   ],
 
   "playerSpawns": [
-    { "x": -2, "y": 1, "z": -2 },
-    { "x": -2, "y": 1, "z": 3 },
-    { "x": 4,  "y": 1, "z": -2 },
-    { "x": 4,  "y": 1, "z": 3 }
+    { "x": -3, "y": 1, "z": -3 },
+    { "x": -3, "y": 1, "z": 5 },
+    { "x": 6,  "y": 1, "z": -3 },
+    { "x": 6,  "y": 1, "z": 5 }
   ],
 
   "contractDefaults": {
