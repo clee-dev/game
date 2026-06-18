@@ -123,8 +123,8 @@ MonoBehaviour:
       m_Calls:
       - m_Target: {fileID: 3911690637486458895}
         m_TargetAssemblyTypeName: PlayerInteraction, Assembly-CSharp
-        m_MethodName: SelectOrderOption
-        m_Mode: 3
+        m_MethodName: CloseOrderMenu
+        m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}
           m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
@@ -1596,6 +1596,7 @@ GameObject:
   - component: {fileID: 6863988874394337960}
   - component: {fileID: 202056677331798990}
   - component: {fileID: 7892364866569668701}
+  - component: {fileID: 4826065095604974933}
   m_Layer: 5
   m_Name: Canvas
   m_TagString: Untagged
@@ -1687,6 +1688,20 @@ MonoBehaviour:
   m_BlockingMask:
     serializedVersion: 2
     m_Bits: 4294967295
+--- !u!114 &4826065095604974933
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7442201448107297847}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ef0ca2bab91e74747b60d4f6591f9b78, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::OrderMenuPanel
+  playerInteraction: {fileID: 3911690637486458895}
+  panel: {fileID: 4775714280579328679}
 --- !u!1 &8308669954564793065
 GameObject:
   m_ObjectHideFlags: 0
