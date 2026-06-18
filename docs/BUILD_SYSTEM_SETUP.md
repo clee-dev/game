@@ -97,16 +97,29 @@ A new prefab, for the ordering system (Systems Architecture, Section 5.3):
 - `Collider` (not a trigger) — this is what `PlayerInteraction`'s raycast hits, same
   raycast-note caveat as §4 below.
 - `OrderStation` script:
-  - `materialPrefab` → the **WoodPlank** prefab from above (mirrors
-    SupplyZoneSpawner/ToolDepotSpawner — the material type is decided by this prefab's
-    field, not read from the blueprint's `orderStations[]` entry)
-  - `orderQuantity` → defaults to 3, fine as-is
+  - `availableMaterials` → an array; add the **WoodPlank** prefab from above as the first
+    entry. This mirrors SupplyZoneSpawner/ToolDepotSpawner in that the available material
+    types are decided by this prefab's own field rather than read from the blueprint's
+    `orderStations[]` entry — it's just a list now instead of a single field, so a player
+    can choose among several raw materials instead of always ordering the one type. Add
+    more entries here as more material prefabs (e.g. Concrete, Steel) get built; each one
+    shows up as its own numbered option in the in-game picker.
+  - `orderQuantity` → defaults to 3, fine as-is (applies to whichever material is chosen,
+    not per-material)
   - `deliveryPoint` → optional. Leave unassigned to have orders delivered to whichever
-    `SupplyZoneSpawner` in the scene spawns the same material type (the design doc's
-    "targetSupplyZone" concept) — this is resolved automatically via
-    `SupplyZoneSpawner.All` at delivery time, no manual link needed between the two.
-    Only assign a Transform here if you want to override that and send deliveries
-    somewhere else entirely (e.g. a drop point closer to the build site).
+    `SupplyZoneSpawner` in the scene spawns the same material type as the one the player
+    picked (the design doc's "targetSupplyZone" concept) — this is resolved automatically
+    via `SupplyZoneSpawner.All` at delivery time, no manual link needed between the two.
+    Only assign a Transform here if you want to override that and send every delivery
+    from this station somewhere else entirely (e.g. a drop point closer to the build site),
+    regardless of which material was ordered.
+
+Interacting with a built `OrderStation` in-game: looking at it and pressing **E** opens a
+small "Order Materials" pop-up listing each `availableMaterials` entry as a numbered option
+(e.g. `[1] Order 3 Wood`); pressing the matching number key (1–9) places that order and
+closes the menu, pressing **E** again with the menu open closes it without ordering. This
+is pure `OnGUI` code in `PlayerInteraction.DrawOrderMenu`/`HandleOrderMenuSelection` —
+no Canvas/Editor setup required, same as the crosshair and delivery queue.
 
 ## 2. Register network prefabs
 
@@ -236,9 +249,11 @@ Run one host + one client (or two clients against a dedicated server):
 - [ ] The tool depot respawns a new hammer ~5s after the first one is picked up
 - [ ] Dropping/disconnecting while holding an item releases it cleanly (no orphaned
       "stuck-held" object)
-- [ ] Looking at an `OrderStation` and pressing E places an order; it immediately appears
-      in the top-right "Incoming Deliveries" list on every connected client with a
-      counting-down timer
+- [ ] Looking at an `OrderStation` and pressing E opens the "Order Materials" pop-up
+      listing each `availableMaterials` entry; pressing the matching number key places
+      that order, which immediately appears in the top-right "Incoming Deliveries" list
+      on every connected client with a counting-down timer; pressing E again with the
+      menu open closes it without ordering
 - [ ] ~15s after ordering, the ordered quantity of materials spawns at the matching
       `SupplyZoneSpawner` (or `deliveryPoint`, if one was assigned) and the queue entry
       disappears

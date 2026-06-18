@@ -33,7 +33,7 @@ public class OrderQueueSystem : NetworkBehaviour
 
     public int MaterialCap => materialCap;
 
-    public struct OrderEntry : IEquatable<OrderEntry>
+    public struct OrderEntry : IEquatable<OrderEntry>, INetworkSerializeByMemcpy
     {
         public MaterialType materialType;
         public int quantity;

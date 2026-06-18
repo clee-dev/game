@@ -94,7 +94,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::OrderStation
   ShowTopMostFoldoutHeaderGroup: 1
-  materialPrefab: {fileID: 2932651196549032005, guid: 6610b68a49155f346b771032040a7657, type: 3}
+  availableMaterials:
+  - {fileID: 2932651196549032005, guid: 6610b68a49155f346b771032040a7657, type: 3}
   orderQuantity: 3
   deliveryPoint: {fileID: 0}
 --- !u!1 &2499065088595725164

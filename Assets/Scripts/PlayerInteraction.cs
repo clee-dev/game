@@ -1,6 +1,7 @@
 using TMPro;
 using Unity.Netcode;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 /// <summary>
 /// Handles all "look at and press E" interaction for the local player: picking up
@@ -30,6 +31,7 @@ public class PlayerInteraction : NetworkBehaviour
 
     private InputReader   _input;
     private PhysicsPickup _heldObject;
+    private OrderStation  _openOrderMenuTarget;
 
     private void Awake()
     {
@@ -51,9 +53,13 @@ public class PlayerInteraction : NetworkBehaviour
         OrderStation  orderTarget  = hitCollider != null ? hitCollider.GetComponentInParent<OrderStation>()  : null;
         _isTargetingInteractable = tileTarget != null || pickupTarget != null || orderTarget != null;
 
+        if (_openOrderMenuTarget != null && _openOrderMenuTarget != orderTarget)
+            _openOrderMenuTarget = null;
+
         UpdatePrompt(tileTarget, orderTarget);
         HandleContinuousBuild(tileTarget);
         HandleInteractPress(tileTarget, pickupTarget, orderTarget);
+        HandleOrderMenuSelection();
     }
 
     // -------------------------------------------------------------------------
@@ -94,8 +100,10 @@ public class PlayerInteraction : NetworkBehaviour
 
         if (orderTarget != null)
         {
-            if (!orderTarget.WouldExceedCap)
-                orderTarget.PlaceOrderRpc();
+            if (_openOrderMenuTarget == orderTarget)
+                _openOrderMenuTarget = null; // pressing E again closes the menu
+            else if (!orderTarget.WouldExceedCap)
+                _openOrderMenuTarget = orderTarget; // open the material picker
             return;
         }
 
@@ -149,6 +157,33 @@ public class PlayerInteraction : NetworkBehaviour
     }
 
     // -------------------------------------------------------------------------
+    // Order menu (material picker) -- opened by HandleInteractPress when looking
+    // at an OrderStation. Local-only UI state; the actual order is still a
+    // server RPC once a material is chosen, same delivery pipeline as before.
+    // -------------------------------------------------------------------------
+
+    private static readonly Key[] DigitKeys =
+    {
+        Key.Digit1, Key.Digit2, Key.Digit3, Key.Digit4, Key.Digit5,
+        Key.Digit6, Key.Digit7, Key.Digit8, Key.Digit9,
+    };
+
+    private void HandleOrderMenuSelection()
+    {
+        if (_openOrderMenuTarget == null || Keyboard.current == null) return;
+
+        int count = Mathf.Min(_openOrderMenuTarget.MaterialCount, DigitKeys.Length);
+        for (int i = 0; i < count; i++)
+        {
+            if (!Keyboard.current[DigitKeys[i]].wasPressedThisFrame) continue;
+
+            _openOrderMenuTarget.PlaceOrderRpc(i);
+            _openOrderMenuTarget = null;
+            break;
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Prompt
     // -------------------------------------------------------------------------
 
@@ -158,9 +193,11 @@ public class PlayerInteraction : NetworkBehaviour
 
         if (orderTarget != null)
         {
-            interactPrompt.text = orderTarget.WouldExceedCap
-                ? "Material cap reached"
-                : $"[E] {orderTarget.DescribeOrder()}";
+            interactPrompt.text = _openOrderMenuTarget == orderTarget
+                ? "[1-9] Choose Material -- [E] Cancel"
+                : orderTarget.WouldExceedCap
+                    ? "Material cap reached"
+                    : "[E] Order Materials";
             return;
         }
 
@@ -206,6 +243,38 @@ public class PlayerInteraction : NetworkBehaviour
         GUI.color = Color.white;
 
         DrawOrderQueue();
+        DrawOrderMenu();
+    }
+
+    // -------------------------------------------------------------------------
+    // Order menu rendering -- a small list of selectable materials centered
+    // below the crosshair while _openOrderMenuTarget is set.
+    // -------------------------------------------------------------------------
+
+    private const float MenuWidth      = 220f;
+    private const float MenuLineHeight = 22f;
+    private const float MenuPadding    = 8f;
+
+    private void DrawOrderMenu()
+    {
+        if (_openOrderMenuTarget == null) return;
+
+        int count = _openOrderMenuTarget.MaterialCount;
+        float height = MenuPadding * 2f + MenuLineHeight * (count + 1);
+        var area = new Rect(
+            Screen.width * 0.5f - MenuWidth * 0.5f,
+            Screen.height * 0.5f + 20f,
+            MenuWidth, height);
+
+        GUI.Box(area, "Order Materials");
+        for (int i = 0; i < count; i++)
+        {
+            var lineRect = new Rect(
+                area.x + MenuPadding,
+                area.y + MenuPadding + MenuLineHeight * (i + 1),
+                MenuWidth - MenuPadding * 2f, MenuLineHeight);
+            GUI.Label(lineRect, $"[{i + 1}] {_openOrderMenuTarget.DescribeOption(i)}");
+        }
     }
 
     // -------------------------------------------------------------------------
