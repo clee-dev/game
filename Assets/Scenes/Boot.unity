@@ -473,6 +473,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 01db1f1fe8d234d4eb108cc05770582d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::BootLoader
+  mainMenuSceneName: MainMenu
 --- !u!114 &2076636377
 MonoBehaviour:
   m_ObjectHideFlags: 0

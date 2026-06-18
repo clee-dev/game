@@ -119,6 +119,79 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
+--- !u!1 &189386644
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 189386646}
+  - component: {fileID: 189386645}
+  - component: {fileID: 189386647}
+  m_Layer: 0
+  m_Name: OrderQueueSystem
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &189386645
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 189386644}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
+  GlobalObjectIdHash: 1796237992
+  InScenePlacedSourceGlobalObjectIdHash: 0
+  DeferredDespawnTick: 0
+  Ownership: 1
+  AlwaysReplicateAsRoot: 0
+  SynchronizeTransform: 1
+  ActiveSceneSynchronization: 0
+  SceneMigrationSynchronization: 0
+  SpawnWithObservers: 1
+  DontDestroyWithOwner: 0
+  AutoObjectParentSync: 1
+  SyncOwnerTransformWhenParented: 1
+  AllowOwnerToParent: 0
+--- !u!4 &189386646
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 189386644}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 1.32364, y: -0.52, z: 5.7894}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &189386647
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 189386644}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e32e7b289cdcb9046a05731b061bef80, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::OrderQueueSystem
+  ShowTopMostFoldoutHeaderGroup: 1
+  materialCap: 15
+  deliveryDelay: 2
 --- !u!1 &1300625213
 GameObject:
   m_ObjectHideFlags: 0
@@ -152,6 +225,7 @@ MonoBehaviour:
   tilePrefab: {fileID: 6034926013607929517, guid: f346603e71450234db9fe5a19e0f452a, type: 3}
   supplyZoneSpawnerPrefab: {fileID: 8069203733129338480, guid: 67a803d109c39654192a9a8cb6816b4f, type: 3}
   toolDepotSpawnerPrefab: {fileID: 8075906239925477855, guid: c2fe0e8219146cb488dc5b647053dda7, type: 3}
+  orderStationPrefab: {fileID: 0}
 --- !u!4 &1300625215
 Transform:
   m_ObjectHideFlags: 0
@@ -527,3 +601,4 @@ SceneRoots:
   - {fileID: 2115382388}
   - {fileID: 1749055127}
   - {fileID: 1300625215}
+  - {fileID: 189386646}
