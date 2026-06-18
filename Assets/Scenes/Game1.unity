@@ -119,75 +119,6 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1001 &59323476
-PrefabInstance:
-  m_ObjectHideFlags: 0
-  serializedVersion: 2
-  m_Modification:
-    serializedVersion: 3
-    m_TransformParent: {fileID: 0}
-    m_Modifications:
-    - target: {fileID: 1238642008587050208, guid: 456f92b2dbef5a14ea9ac9d2ab9d5b75, type: 3}
-      propertyPath: m_LocalPosition.x
-      value: -1.5
-      objectReference: {fileID: 0}
-    - target: {fileID: 1238642008587050208, guid: 456f92b2dbef5a14ea9ac9d2ab9d5b75, type: 3}
-      propertyPath: m_LocalPosition.y
-      value: 0.5
-      objectReference: {fileID: 0}
-    - target: {fileID: 1238642008587050208, guid: 456f92b2dbef5a14ea9ac9d2ab9d5b75, type: 3}
-      propertyPath: m_LocalPosition.z
-      value: 0.5
-      objectReference: {fileID: 0}
-    - target: {fileID: 1238642008587050208, guid: 456f92b2dbef5a14ea9ac9d2ab9d5b75, type: 3}
-      propertyPath: m_LocalRotation.w
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 1238642008587050208, guid: 456f92b2dbef5a14ea9ac9d2ab9d5b75, type: 3}
-      propertyPath: m_LocalRotation.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 1238642008587050208, guid: 456f92b2dbef5a14ea9ac9d2ab9d5b75, type: 3}
-      propertyPath: m_LocalRotation.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 1238642008587050208, guid: 456f92b2dbef5a14ea9ac9d2ab9d5b75, type: 3}
-      propertyPath: m_LocalRotation.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 1238642008587050208, guid: 456f92b2dbef5a14ea9ac9d2ab9d5b75, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 1238642008587050208, guid: 456f92b2dbef5a14ea9ac9d2ab9d5b75, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 1238642008587050208, guid: 456f92b2dbef5a14ea9ac9d2ab9d5b75, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 6190780534038347513, guid: 456f92b2dbef5a14ea9ac9d2ab9d5b75, type: 3}
-      propertyPath: GlobalObjectIdHash
-      value: 2588726054
-      objectReference: {fileID: 0}
-    - target: {fileID: 6190780534038347513, guid: 456f92b2dbef5a14ea9ac9d2ab9d5b75, type: 3}
-      propertyPath: SceneMigrationSynchronization
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 6190780534038347513, guid: 456f92b2dbef5a14ea9ac9d2ab9d5b75, type: 3}
-      propertyPath: InScenePlacedSourceGlobalObjectIdHash
-      value: 1291919545
-      objectReference: {fileID: 0}
-    - target: {fileID: 8421532194043222775, guid: 456f92b2dbef5a14ea9ac9d2ab9d5b75, type: 3}
-      propertyPath: m_Name
-      value: Hammer
-      objectReference: {fileID: 0}
-    m_RemovedComponents: []
-    m_RemovedGameObjects: []
-    m_AddedGameObjects: []
-    m_AddedComponents: []
-  m_SourcePrefab: {fileID: 100100000, guid: 456f92b2dbef5a14ea9ac9d2ab9d5b75, type: 3}
 --- !u!1 &1300625213
 GameObject:
   m_ObjectHideFlags: 0
@@ -220,6 +151,7 @@ MonoBehaviour:
   blueprintId: blueprint_001
   tilePrefab: {fileID: 6034926013607929517, guid: f346603e71450234db9fe5a19e0f452a, type: 3}
   supplyZoneSpawnerPrefab: {fileID: 8069203733129338480, guid: 67a803d109c39654192a9a8cb6816b4f, type: 3}
+  toolDepotSpawnerPrefab: {fileID: 8075906239925477855, guid: c2fe0e8219146cb488dc5b647053dda7, type: 3}
 --- !u!4 &1300625215
 Transform:
   m_ObjectHideFlags: 0
@@ -595,4 +527,3 @@ SceneRoots:
   - {fileID: 2115382388}
   - {fileID: 1749055127}
   - {fileID: 1300625215}
-  - {fileID: 59323476}
