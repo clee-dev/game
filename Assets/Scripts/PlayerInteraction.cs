@@ -48,11 +48,12 @@ public class PlayerInteraction : NetworkBehaviour
 
         BuildTile     tileTarget   = hitCollider != null ? hitCollider.GetComponentInParent<BuildTile>()    : null;
         PhysicsPickup pickupTarget = hitCollider != null ? hitCollider.GetComponentInParent<PhysicsPickup>() : null;
-        _isTargetingInteractable = tileTarget != null || pickupTarget != null;
+        OrderStation  orderTarget  = hitCollider != null ? hitCollider.GetComponentInParent<OrderStation>()  : null;
+        _isTargetingInteractable = tileTarget != null || pickupTarget != null || orderTarget != null;
 
-        UpdatePrompt(tileTarget);
+        UpdatePrompt(tileTarget, orderTarget);
         HandleContinuousBuild(tileTarget);
-        HandleInteractPress(tileTarget, pickupTarget);
+        HandleInteractPress(tileTarget, pickupTarget, orderTarget);
     }
 
     // -------------------------------------------------------------------------
@@ -86,10 +87,17 @@ public class PlayerInteraction : NetworkBehaviour
     // Single press: pick up / place / drop
     // -------------------------------------------------------------------------
 
-    private void HandleInteractPress(BuildTile tileTarget, PhysicsPickup pickupTarget)
+    private void HandleInteractPress(BuildTile tileTarget, PhysicsPickup pickupTarget, OrderStation orderTarget)
     {
         if (!_input.InteractPressed) return;
         _input.ConsumeInteract();
+
+        if (orderTarget != null)
+        {
+            if (!orderTarget.WouldExceedCap)
+                orderTarget.PlaceOrderRpc();
+            return;
+        }
 
         if (_heldObject == null)
         {
@@ -144,9 +152,17 @@ public class PlayerInteraction : NetworkBehaviour
     // Prompt
     // -------------------------------------------------------------------------
 
-    private void UpdatePrompt(BuildTile target)
+    private void UpdatePrompt(BuildTile target, OrderStation orderTarget)
     {
         if (interactPrompt == null) return;
+
+        if (orderTarget != null)
+        {
+            interactPrompt.text = orderTarget.WouldExceedCap
+                ? "Material cap reached"
+                : $"[E] {orderTarget.DescribeOrder()}";
+            return;
+        }
 
         if (target != null && _heldObject != null)
         {
@@ -188,6 +204,40 @@ public class PlayerInteraction : NetworkBehaviour
             Screen.height * 0.5f - CrosshairSize * 0.5f,
             CrosshairSize, CrosshairSize), Texture2D.whiteTexture);
         GUI.color = Color.white;
+
+        DrawOrderQueue();
+    }
+
+    // -------------------------------------------------------------------------
+    // Delivery queue -- top-right list of incoming orders (Systems Architecture,
+    // Section 5.3). Shared across the team, not per-player, so it reads straight
+    // from OrderQueueSystem's replicated list rather than tracking anything locally.
+    // -------------------------------------------------------------------------
+
+    private const float QueueWidth      = 220f;
+    private const float QueueLineHeight = 20f;
+    private const float QueuePadding    = 8f;
+
+    private void DrawOrderQueue()
+    {
+        if (OrderQueueSystem.Instance == null) return;
+
+        var orders = OrderQueueSystem.Instance.PendingOrders;
+        if (orders.Count == 0) return;
+
+        float height = QueuePadding * 2f + QueueLineHeight * (orders.Count + 1);
+        var area = new Rect(Screen.width - QueueWidth - 10f, 10f, QueueWidth, height);
+
+        GUI.Box(area, "Incoming Deliveries");
+        for (int i = 0; i < orders.Count; i++)
+        {
+            var order = orders[i];
+            var lineRect = new Rect(
+                area.x + QueuePadding,
+                area.y + QueuePadding + QueueLineHeight * (i + 1),
+                QueueWidth - QueuePadding * 2f, QueueLineHeight);
+            GUI.Label(lineRect, $"{order.quantity}x {order.materialType} -- {Mathf.CeilToInt(order.remainingSeconds)}s");
+        }
     }
 
     // -------------------------------------------------------------------------

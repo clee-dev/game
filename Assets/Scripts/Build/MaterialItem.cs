@@ -32,11 +32,13 @@ public class MaterialItem : NetworkBehaviour
     public override void OnNetworkSpawn()
     {
         _pickup.HeldStateChanged += OnPickupHeldChanged;
+        if (IsServer) OrderQueueSystem.Instance?.RegisterMaterialSpawned();
     }
 
     public override void OnNetworkDespawn()
     {
         _pickup.HeldStateChanged -= OnPickupHeldChanged;
+        if (IsServer) OrderQueueSystem.Instance?.RegisterMaterialDespawned();
     }
 
     private void OnPickupHeldChanged(bool isHeld)

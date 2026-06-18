@@ -14,11 +14,14 @@ using UnityEngine;
 /// Setup: create an empty GameObject in the level scene (not a NetworkObject -- it
 /// doesn't need to be), add this script, assign tilePrefab (a BuildTile NetworkObject
 /// prefab registered in the NetworkManager's prefab list), supplyZoneSpawnerPrefab
-/// (a plain, non-networked prefab with SupplyZoneSpawner on it), and
-/// toolDepotSpawnerPrefab (same idea, with ToolDepotSpawner). Like supply zones, which
-/// tool a depot spawns is configured on the prefab itself, not read from the blueprint's
-/// ToolDepotData.tools -- fine for the MVP's single tool (hammer); supporting multiple
-/// distinct depot tool types would need a prefab-per-ToolType lookup instead.
+/// (a plain, non-networked prefab with SupplyZoneSpawner on it), toolDepotSpawnerPrefab
+/// (same idea, with ToolDepotSpawner), and orderStationPrefab (an OrderStation
+/// NetworkObject prefab, registered in the prefab list like tilePrefab -- unlike the
+/// spawners, OrderStation is itself a NetworkObject since players need to RPC it
+/// directly). Like supply zones, which tool a depot spawns -- and which material an
+/// order station orders -- is configured on the prefab itself, not read from the
+/// blueprint's ToolDepotData.tools; fine for the MVP's single tool/material, but
+/// supporting multiple distinct types would need a prefab-per-type lookup instead.
 /// </summary>
 public class BuildSystem : MonoBehaviour
 {
@@ -38,6 +41,7 @@ public class BuildSystem : MonoBehaviour
     [SerializeField] private BuildTile tilePrefab;
     [SerializeField] private SupplyZoneSpawner supplyZoneSpawnerPrefab;
     [SerializeField] private ToolDepotSpawner toolDepotSpawnerPrefab;
+    [SerializeField] private OrderStation orderStationPrefab;
 
     public BlueprintData CurrentBlueprint { get; private set; }
 
@@ -96,6 +100,12 @@ public class BuildSystem : MonoBehaviour
 
         foreach (ToolDepotData depot in CurrentBlueprint.toolDepots)
             Instantiate(toolDepotSpawnerPrefab, depot.worldPosition.ToVector3(), Quaternion.identity);
+
+        foreach (OrderStationData station in CurrentBlueprint.orderStations)
+        {
+            var instance = Instantiate(orderStationPrefab, station.worldPosition.ToVector3(), Quaternion.identity);
+            instance.GetComponent<NetworkObject>().Spawn();
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -128,6 +138,7 @@ public class BuildSystem : MonoBehaviour
 
             case TileType.Window:
             case TileType.Door:
+            case TileType.Decor:
                 foreach (var dir in HorizontalNeighbors)
                     if (IsBuiltAt(tile.GridPosition + dir))
                         return true;

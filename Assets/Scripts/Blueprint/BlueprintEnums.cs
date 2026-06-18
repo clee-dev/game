@@ -5,7 +5,10 @@ using System;
 /// lowercase strings (see TileData/ToolDepotData) -- Parse() converts between
 /// the two so gameplay code never deals with raw strings.
 /// </summary>
-public enum TileType { Foundation, Floor, Wall, Window, Door, Column, Furniture }
+// Furniture = ground furniture (beds, chairs -- needs the tile below built, same
+// rule as Floor/Wall/Column). Decor = wall-mounted furniture (paintings, hanging
+// pots -- needs an adjacent built tile, same rule as Window/Door).
+public enum TileType { Foundation, Floor, Wall, Window, Door, Column, Furniture, Decor }
 
 public enum MaterialType { Wood, Concrete, Steel, Any }
 
