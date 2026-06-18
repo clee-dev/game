@@ -29,10 +29,15 @@ Same stack, swap the last component:
 
 ### BuildTile
 
-A new prefab, sized to exactly one grid cell (1×1×1 world unit, since `BuildTile` derives
-its grid position with `Vector3Int.RoundToInt(transform.position)`):
+A new prefab. Grid cells are spaced `BuildSystem.CellSize` (2 world units) apart — tiles
+are spawned at `gridPosition * CellSize`, and `BuildTile` recovers its grid coordinate with
+`Vector3Int.RoundToInt(transform.position / CellSize)`:
 - `NetworkObject` — **no** `ClientNetworkTransform` (tiles never move after spawning)
-- `BoxCollider` sized to the cell — this is what `PlayerInteraction`'s raycast hits
+- `BoxCollider` noticeably **smaller than 2 units** (e.g. `1.4 × 1.4 × 1.4`) — this is what
+  `PlayerInteraction`'s raycast hits. Keep it well under the 2-unit cell spacing so adjacent
+  tiles have a real gap between their colliders; flush/touching colliders make it nearly
+  impossible to raycast-aim at one tile over its neighbor (this is exactly what caused the
+  "can only place on foundations, everything is too close together" issue during testing)
 - `BuildTile` script, with:
   - `ghostRenderer` → a transparent unlit quad/cube child, shown while the tile is `Empty`
   - `placedMaterialVisual` → child object toggled on when state is `MaterialPlaced`
@@ -106,7 +111,7 @@ WoodPlank/Hammer/BuildTile are **not** marked `Is Trigger`, or the raycast won't
 
 - **Tool depots**: `blueprint_001.json`'s `toolDepots` entry is schema-faithful data, but
   `BuildSystem` doesn't spawn anything for it yet. For now, manually place a `Hammer`
-  instance in the scene near `worldPosition: {-1.5, 0.5, 0.5}` (the depot's position in
+  instance in the scene near `worldPosition: {-2.5, 0.5, 1}` (the depot's position in
   the blueprint).
 - **Furniture dependency rule**: the three design docs disagree (GDD/Blueprint Schema say
   "adjacent built wall", Systems Architecture's table says "built tile directly below").
@@ -114,7 +119,19 @@ WoodPlank/Hammer/BuildTile are **not** marked `Is Trigger`, or the raycast won't
   you want it switched — `blueprint_001` doesn't use the `furniture` tile type, so this
   doesn't block testing the current blueprint either way.
 
-## 6. Smoke test checklist
+## 6. Fixed since initial setup (no Editor work needed)
+
+- A bug where pressing E while holding the hammer over a buildable tile dropped the
+  hammer instead of starting the build (the single-press handler didn't account for
+  "holding a tool over a tile you can build" and fell through to drop). Fixed in
+  `PlayerInteraction.HandleInteractPress`.
+- A small centered crosshair, drawn via `OnGUI` in `PlayerInteraction` — turns yellow
+  when looking at something interactable. No Canvas/Image setup required, it's pure code.
+- Tile spacing: tiles are now `CellSize` (2 units) apart instead of 1, see §1 BuildTile
+  above. If you already built `blueprint_001`-shaped test geometry by hand for any reason,
+  re-pull the latest `blueprint_001.json` so positions match the new spacing.
+
+## 7. Smoke test checklist
 
 Run one host + one client (or two clients against a dedicated server):
 - [ ] `BuildTile` ghosts appear at the 12 positions from `blueprint_001.json`; only the

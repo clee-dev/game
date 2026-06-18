@@ -20,6 +20,13 @@ public class BuildSystem : MonoBehaviour
 {
     public static BuildSystem Instance { get; private set; }
 
+    /// <summary>
+    /// World units per grid cell. Tiles are spaced out by this much so adjacent
+    /// BuildTile colliders aren't flush against each other -- flush colliders make
+    /// it nearly impossible to raycast-target one tile over its neighbor.
+    /// </summary>
+    public const float CellSize = 2f;
+
     [Header("Blueprint")]
     [SerializeField] private string blueprintId = "blueprint_001";
 
@@ -74,7 +81,8 @@ public class BuildSystem : MonoBehaviour
     {
         foreach (TileData tile in CurrentBlueprint.tiles)
         {
-            var instance = Instantiate(tilePrefab, tile.position.ToVector3Int(), Quaternion.identity);
+            Vector3 worldPos = (Vector3)tile.position.ToVector3Int() * CellSize;
+            var instance = Instantiate(tilePrefab, worldPos, Quaternion.identity);
             instance.GetComponent<NetworkObject>().Spawn();
         }
 

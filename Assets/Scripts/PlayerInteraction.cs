@@ -48,6 +48,7 @@ public class PlayerInteraction : NetworkBehaviour
 
         BuildTile     tileTarget   = hitCollider != null ? hitCollider.GetComponentInParent<BuildTile>()    : null;
         PhysicsPickup pickupTarget = hitCollider != null ? hitCollider.GetComponentInParent<PhysicsPickup>() : null;
+        _isTargetingInteractable = tileTarget != null || pickupTarget != null;
 
         UpdatePrompt(tileTarget);
         HandleContinuousBuild(tileTarget);
@@ -102,6 +103,13 @@ public class PlayerInteraction : NetworkBehaviour
             PlaceHeldMaterial(tileTarget);
             return;
         }
+
+        // Holding a tool over a buildable tile: the press that starts the hold
+        // shouldn't also register as "drop" -- building itself is driven by
+        // HandleContinuousBuild while E stays held.
+        var tool = _heldObject.GetComponent<ToolItem>();
+        if (tool != null && tileTarget != null && tileTarget.CanBuild(tool.Type))
+            return;
 
         Drop();
     }
@@ -158,6 +166,28 @@ public class PlayerInteraction : NetworkBehaviour
         }
 
         interactPrompt.text = _heldObject != null ? "[E] Drop" : "";
+    }
+
+    // -------------------------------------------------------------------------
+    // Crosshair -- a centered dot so the player can tell exactly what the
+    // raycast is aimed at when targets are close together. Drawn directly via
+    // OnGUI so it needs no Canvas/Image setup in the scene or prefab.
+    // -------------------------------------------------------------------------
+
+    private const float CrosshairSize = 6f;
+
+    private bool _isTargetingInteractable;
+
+    private void OnGUI()
+    {
+        if (!IsOwner) return;
+
+        GUI.color = _isTargetingInteractable ? Color.yellow : Color.white;
+        GUI.DrawTexture(new Rect(
+            Screen.width  * 0.5f - CrosshairSize * 0.5f,
+            Screen.height * 0.5f - CrosshairSize * 0.5f,
+            CrosshairSize, CrosshairSize), Texture2D.whiteTexture);
+        GUI.color = Color.white;
     }
 
     // -------------------------------------------------------------------------
