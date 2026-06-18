@@ -163,6 +163,11 @@ WoodPlank/Hammer/BuildTile are **not** marked `Is Trigger`, or the raycast won't
   re-pull the latest `blueprint_001.json` so positions match the new spacing.
 - Tool depots now spawn a tool via the new `ToolDepotSpawner` (§1/§3 above), mirroring
   `SupplyZoneSpawner` — no more manual placement needed.
+- The progress bar canvas now billboards toward the local player's camera while it's
+  visible (`BuildTile.LateUpdate`), so it stays readable instead of facing whatever
+  direction it was spawned in. Pure code, no Editor wiring needed — it only rotates
+  `progressBarRoot` while that object is active, i.e. while someone is actively
+  building the tile, so idle tiles cost nothing.
 
 ## 7. Smoke test checklist
 

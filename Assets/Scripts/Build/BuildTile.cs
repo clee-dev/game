@@ -101,6 +101,24 @@ public class BuildTile : NetworkBehaviour
     public void RefreshEligibility() => RefreshVisual();
 
     // -------------------------------------------------------------------------
+    // Progress bar billboard -- only runs while the bar is actually showing (i.e.
+    // someone is actively building this tile), so idle tiles cost nothing here.
+    // Camera.main is always the local player's camera; NetworkPlayer disables every
+    // other player's camera component, so this needs no IsOwner/ownership check.
+    // -------------------------------------------------------------------------
+
+    private void LateUpdate()
+    {
+        if (progressBarRoot == null || !progressBarRoot.activeSelf) return;
+        if (Camera.main == null) return;
+
+        Vector3 toCamera = Camera.main.transform.position - progressBarRoot.transform.position;
+        toCamera.y = 0f; // yaw only, keep the bar upright instead of tilting to camera height
+        if (toCamera.sqrMagnitude > 0.0001f)
+            progressBarRoot.transform.rotation = Quaternion.LookRotation(toCamera);
+    }
+
+    // -------------------------------------------------------------------------
     // Visual (Section 6.4) -- pure function of replicated state, runs on every client
     // -------------------------------------------------------------------------
 
