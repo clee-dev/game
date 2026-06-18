@@ -18,10 +18,11 @@ using UnityEngine;
 /// (same idea, with ToolDepotSpawner), and orderStationPrefab (an OrderStation
 /// NetworkObject prefab, registered in the prefab list like tilePrefab -- unlike the
 /// spawners, OrderStation is itself a NetworkObject since players need to RPC it
-/// directly). Like supply zones, which tool a depot spawns -- and which material an
-/// order station orders -- is configured on the prefab itself, not read from the
-/// blueprint's ToolDepotData.tools; fine for the MVP's single tool/material, but
-/// supporting multiple distinct types would need a prefab-per-type lookup instead.
+/// directly). Which material an order station orders is configured on the prefab
+/// itself (fine for the MVP's single material). Tool depots are the exception --
+/// toolDepotSpawnerPrefab needs every ToolItem type assigned in its toolPrefabs array,
+/// and SpawnFromBlueprint() calls Configure(depot.tools) on each instance so depots
+/// can offer different tool subsets per the blueprint's ToolDepotData.tools.
 /// </summary>
 public class BuildSystem : MonoBehaviour
 {
@@ -72,7 +73,11 @@ public class BuildSystem : MonoBehaviour
 
     private void LoadBlueprintAndBuildLookups()
     {
-        CurrentBlueprint = BlueprintLoader.Load(blueprintId);
+        string idToLoad = !string.IsNullOrEmpty(GameSession.Instance?.SelectedBlueprintId)
+            ? GameSession.Instance.SelectedBlueprintId
+            : blueprintId;
+
+        CurrentBlueprint = BlueprintLoader.Load(idToLoad);
         if (CurrentBlueprint == null) return;
 
         foreach (TileData tile in CurrentBlueprint.tiles)
@@ -99,7 +104,10 @@ public class BuildSystem : MonoBehaviour
             Instantiate(supplyZoneSpawnerPrefab, zone.worldPosition.ToVector3(), Quaternion.identity);
 
         foreach (ToolDepotData depot in CurrentBlueprint.toolDepots)
-            Instantiate(toolDepotSpawnerPrefab, depot.worldPosition.ToVector3(), Quaternion.identity);
+        {
+            var instance = Instantiate(toolDepotSpawnerPrefab, depot.worldPosition.ToVector3(), Quaternion.identity);
+            instance.Configure(depot.tools);
+        }
 
         foreach (OrderStationData station in CurrentBlueprint.orderStations)
         {

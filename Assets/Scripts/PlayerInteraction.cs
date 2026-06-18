@@ -30,9 +30,10 @@ public class PlayerInteraction : NetworkBehaviour
     [SerializeField] private float interactRange = 2.5f;
     [SerializeField] private float throwForce    = 8f;
 
-    private InputReader   _input;
-    private PhysicsPickup _heldObject;
-    private OrderStation  _openOrderMenuTarget;
+    private InputReader      _input;
+    private PhysicsPickup    _heldObject;
+    private OrderStation     _openOrderMenuTarget;
+    private LevelSelectKiosk _openKioskMenuTarget;
 
     private void Awake()
     {
@@ -49,18 +50,22 @@ public class PlayerInteraction : NetworkBehaviour
             out RaycastHit hit, interactRange);
         Collider hitCollider = hit.collider;
 
-        BuildTile     tileTarget   = hitCollider != null ? hitCollider.GetComponentInParent<BuildTile>()    : null;
-        PhysicsPickup pickupTarget = hitCollider != null ? hitCollider.GetComponentInParent<PhysicsPickup>() : null;
-        OrderStation  orderTarget  = hitCollider != null ? hitCollider.GetComponentInParent<OrderStation>()  : null;
-        _isTargetingInteractable = tileTarget != null || pickupTarget != null || orderTarget != null;
+        BuildTile        tileTarget   = hitCollider != null ? hitCollider.GetComponentInParent<BuildTile>()        : null;
+        PhysicsPickup    pickupTarget = hitCollider != null ? hitCollider.GetComponentInParent<PhysicsPickup>()    : null;
+        OrderStation     orderTarget  = hitCollider != null ? hitCollider.GetComponentInParent<OrderStation>()     : null;
+        LevelSelectKiosk kioskTarget  = hitCollider != null ? hitCollider.GetComponentInParent<LevelSelectKiosk>() : null;
+        _isTargetingInteractable = tileTarget != null || pickupTarget != null || orderTarget != null || kioskTarget != null;
 
         if (_openOrderMenuTarget != null && _openOrderMenuTarget != orderTarget)
             CloseOrderMenu();
+        if (_openKioskMenuTarget != null && _openKioskMenuTarget != kioskTarget)
+            CloseKioskMenu();
 
-        UpdatePrompt(tileTarget, orderTarget);
+        UpdatePrompt(tileTarget, orderTarget, kioskTarget);
         HandleContinuousBuild(tileTarget);
-        HandleInteractPress(tileTarget, pickupTarget, orderTarget);
+        HandleInteractPress(tileTarget, pickupTarget, orderTarget, kioskTarget);
         HandleOrderMenuSelection();
+        HandleKioskMenuSelection();
     }
 
     // -------------------------------------------------------------------------
@@ -94,10 +99,19 @@ public class PlayerInteraction : NetworkBehaviour
     // Single press: pick up / place / drop
     // -------------------------------------------------------------------------
 
-    private void HandleInteractPress(BuildTile tileTarget, PhysicsPickup pickupTarget, OrderStation orderTarget)
+    private void HandleInteractPress(BuildTile tileTarget, PhysicsPickup pickupTarget, OrderStation orderTarget, LevelSelectKiosk kioskTarget)
     {
         if (!_input.InteractPressed) return;
         _input.ConsumeInteract();
+
+        if (kioskTarget != null)
+        {
+            if (_openKioskMenuTarget == kioskTarget)
+                CloseKioskMenu(); // pressing E again closes the menu
+            else
+                OpenKioskMenu(kioskTarget);
+            return;
+        }
 
         if (orderTarget != null)
         {
@@ -213,12 +227,66 @@ public class PlayerInteraction : NetworkBehaviour
     }
 
     // -------------------------------------------------------------------------
+    // Kiosk menu (blueprint picker) -- Hub-only, opened by HandleInteractPress when
+    // looking at a LevelSelectKiosk. Same open/close/number-key-selection shape as the
+    // order menu above.
+    // -------------------------------------------------------------------------
+
+    public bool             IsKioskMenuOpen     => _openKioskMenuTarget != null;
+    public LevelSelectKiosk OpenKioskMenuTarget => _openKioskMenuTarget;
+
+    private void HandleKioskMenuSelection()
+    {
+        if (_openKioskMenuTarget == null || Keyboard.current == null) return;
+
+        int count = Mathf.Min(_openKioskMenuTarget.OptionCount, DigitKeys.Length);
+        for (int i = 0; i < count; i++)
+        {
+            if (!Keyboard.current[DigitKeys[i]].wasPressedThisFrame) continue;
+
+            SelectKioskOption(i);
+            break;
+        }
+    }
+
+    private void OpenKioskMenu(LevelSelectKiosk kiosk)
+    {
+        kiosk.RefreshAvailableBlueprints();
+        _openKioskMenuTarget = kiosk;
+        if (mouseLook != null) mouseLook.SetLookEnabled(false);
+    }
+
+    /// <summary>Wire a UI Button's OnClick to this, with the option's index as its static int argument.</summary>
+    public void SelectKioskOption(int index)
+    {
+        if (_openKioskMenuTarget == null) return;
+
+        _openKioskMenuTarget.SelectBlueprintRpc(_openKioskMenuTarget.IdAt(index));
+        CloseKioskMenu();
+    }
+
+    /// <summary>Wire a Cancel button's OnClick to this, or call it from anywhere else that should dismiss the menu.</summary>
+    public void CloseKioskMenu()
+    {
+        _openKioskMenuTarget = null;
+        if (mouseLook != null) mouseLook.SetLookEnabled(true);
+    }
+
+    // -------------------------------------------------------------------------
     // Prompt
     // -------------------------------------------------------------------------
 
-    private void UpdatePrompt(BuildTile target, OrderStation orderTarget)
+    private void UpdatePrompt(BuildTile target, OrderStation orderTarget, LevelSelectKiosk kioskTarget)
     {
         if (interactPrompt == null) return;
+
+        if (kioskTarget != null)
+        {
+            interactPrompt.text = _openKioskMenuTarget == kioskTarget
+                ? "[1-9] Choose Level -- [E] Cancel"
+                : "[E] Select Level";
+            return;
+        }
 
         if (orderTarget != null)
         {
@@ -273,6 +341,7 @@ public class PlayerInteraction : NetworkBehaviour
 
         DrawOrderQueue();
         DrawOrderMenu();
+        DrawKioskMenu();
     }
 
     // -------------------------------------------------------------------------
@@ -303,6 +372,33 @@ public class PlayerInteraction : NetworkBehaviour
                 area.y + MenuPadding + MenuLineHeight * (i + 1),
                 MenuWidth - MenuPadding * 2f, MenuLineHeight);
             GUI.Label(lineRect, $"[{i + 1}] {_openOrderMenuTarget.DescribeOption(i)}");
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Kiosk menu rendering -- same layout as the order menu, listing blueprints
+    // instead of materials while _openKioskMenuTarget is set.
+    // -------------------------------------------------------------------------
+
+    private void DrawKioskMenu()
+    {
+        if (_openKioskMenuTarget == null) return;
+
+        int count = _openKioskMenuTarget.OptionCount;
+        float height = MenuPadding * 2f + MenuLineHeight * (count + 1);
+        var area = new Rect(
+            Screen.width * 0.5f - MenuWidth * 0.5f,
+            Screen.height * 0.5f + 20f,
+            MenuWidth, height);
+
+        GUI.Box(area, "Select Level");
+        for (int i = 0; i < count; i++)
+        {
+            var lineRect = new Rect(
+                area.x + MenuPadding,
+                area.y + MenuPadding + MenuLineHeight * (i + 1),
+                MenuWidth - MenuPadding * 2f, MenuLineHeight);
+            GUI.Label(lineRect, $"[{i + 1}] {_openKioskMenuTarget.DescribeOption(i)}");
         }
     }
 
