@@ -22,6 +22,7 @@ public class PlayerInteraction : NetworkBehaviour
 {
     [Header("References")]
     [SerializeField] private Camera          playerCamera;
+    [SerializeField] private PlayerCamera    mouseLook;      // Same Main Camera child as playerCamera, different component
     [SerializeField] private Transform       holdPoint;      // Child of camera, where held object sits
     [SerializeField] private TextMeshProUGUI interactPrompt; // optional, screen-space
 
@@ -54,7 +55,7 @@ public class PlayerInteraction : NetworkBehaviour
         _isTargetingInteractable = tileTarget != null || pickupTarget != null || orderTarget != null;
 
         if (_openOrderMenuTarget != null && _openOrderMenuTarget != orderTarget)
-            _openOrderMenuTarget = null;
+            CloseOrderMenu();
 
         UpdatePrompt(tileTarget, orderTarget);
         HandleContinuousBuild(tileTarget);
@@ -101,9 +102,9 @@ public class PlayerInteraction : NetworkBehaviour
         if (orderTarget != null)
         {
             if (_openOrderMenuTarget == orderTarget)
-                _openOrderMenuTarget = null; // pressing E again closes the menu
+                CloseOrderMenu(); // pressing E again closes the menu
             else if (!orderTarget.WouldExceedCap)
-                _openOrderMenuTarget = orderTarget; // open the material picker
+                OpenOrderMenu(orderTarget);
             return;
         }
 
@@ -160,7 +161,14 @@ public class PlayerInteraction : NetworkBehaviour
     // Order menu (material picker) -- opened by HandleInteractPress when looking
     // at an OrderStation. Local-only UI state; the actual order is still a
     // server RPC once a material is chosen, same delivery pipeline as before.
+    //
+    // Selection works two ways: number keys (HandleOrderMenuSelection below) and
+    // mouse clicks on UI Buttons wired to SelectOrderOption/CloseOrderMenu -- both
+    // funnel through the same methods, so a click and a keypress behave identically.
     // -------------------------------------------------------------------------
+
+    public bool         IsOrderMenuOpen     => _openOrderMenuTarget != null;
+    public OrderStation OpenOrderMenuTarget => _openOrderMenuTarget;
 
     private static readonly Key[] DigitKeys =
     {
@@ -177,10 +185,31 @@ public class PlayerInteraction : NetworkBehaviour
         {
             if (!Keyboard.current[DigitKeys[i]].wasPressedThisFrame) continue;
 
-            _openOrderMenuTarget.PlaceOrderRpc(i);
-            _openOrderMenuTarget = null;
+            SelectOrderOption(i);
             break;
         }
+    }
+
+    private void OpenOrderMenu(OrderStation station)
+    {
+        _openOrderMenuTarget = station;
+        if (mouseLook != null) mouseLook.SetLookEnabled(false);
+    }
+
+    /// <summary>Wire a UI Button's OnClick to this, with the option's index as its static int argument.</summary>
+    public void SelectOrderOption(int index)
+    {
+        if (_openOrderMenuTarget == null) return;
+
+        _openOrderMenuTarget.PlaceOrderRpc(index);
+        CloseOrderMenu();
+    }
+
+    /// <summary>Wire a Cancel button's OnClick to this, or call it from anywhere else that should dismiss the menu.</summary>
+    public void CloseOrderMenu()
+    {
+        _openOrderMenuTarget = null;
+        if (mouseLook != null) mouseLook.SetLookEnabled(true);
     }
 
     // -------------------------------------------------------------------------

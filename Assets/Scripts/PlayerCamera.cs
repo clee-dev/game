@@ -64,4 +64,14 @@ public class PlayerCamera : MonoBehaviour
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible   = true;
     }
+
+    /// <summary>
+    /// Lets other local UI (e.g. PlayerInteraction's order menu) borrow control of the
+    /// cursor without going through the global GameEvents pause flow.
+    /// </summary>
+    public void SetLookEnabled(bool active)
+    {
+        if (active) EnableMouseLook();
+        else DisableMouseLook();
+    }
 }
