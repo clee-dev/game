@@ -33,6 +33,11 @@ public class LevelEditorController : MonoBehaviour
 
     [SerializeField] private LevelEditorCamera editorCamera;
 
+    /// <summary>Pause overlay Canvas (PauseMenu) -- hidden during Preview Mode so its
+    /// unconditional Escape handling doesn't fight LevelEditorPreviewController's own
+    /// Escape-to-exit-Preview binding.</summary>
+    [SerializeField] private GameObject pauseCanvas;
+
     public EditableBlueprint Blueprint { get; private set; } = new();
     public EditorCommandStack Commands { get; } = new();
 
@@ -288,26 +293,58 @@ public class LevelEditorController : MonoBehaviour
         switch (BrushCategory)
         {
             case WorldObjectCategory.SupplyZone:
-                AddWorldObject(Blueprint.SupplyZones, new SupplyZoneData { id = Blueprint.NextSupplyZoneId(), worldPosition = ToWorldPosition(worldPos) });
+                PlaceOrReplace(Blueprint.SupplyZones, d => d.worldPosition.ToVector3(), worldPos,
+                    () => new SupplyZoneData { id = Blueprint.NextSupplyZoneId(), worldPosition = ToWorldPosition(worldPos) });
                 break;
             case WorldObjectCategory.OrderStation:
-                AddWorldObject(Blueprint.OrderStations, new OrderStationData { id = Blueprint.NextOrderStationId(), worldPosition = ToWorldPosition(worldPos) });
+                PlaceOrReplace(Blueprint.OrderStations, d => d.worldPosition.ToVector3(), worldPos,
+                    () => new OrderStationData { id = Blueprint.NextOrderStationId(), worldPosition = ToWorldPosition(worldPos) });
                 break;
             case WorldObjectCategory.ToolDepot:
-                AddWorldObject(Blueprint.ToolDepots, new ToolDepotData { id = Blueprint.NextToolDepotId(), worldPosition = ToWorldPosition(worldPos), tools = new[] { "hammer" } });
+                PlaceOrReplace(Blueprint.ToolDepots, d => d.worldPosition.ToVector3(), worldPos,
+                    () => new ToolDepotData { id = Blueprint.NextToolDepotId(), worldPosition = ToWorldPosition(worldPos), tools = new[] { "hammer" } });
                 break;
             case WorldObjectCategory.PlayerSpawn:
-                if (Blueprint.PlayerSpawns.Count < 4)
-                    AddWorldObject(Blueprint.PlayerSpawns, ToWorldPosition(worldPos));
+                PlaceOrReplace(Blueprint.PlayerSpawns, d => d.ToVector3(), worldPos,
+                    () => ToWorldPosition(worldPos), maxCount: 4);
                 break;
         }
     }
 
-    private void AddWorldObject<T>(List<T> list, T item)
+    /// <summary>Replaces whatever's already within pickRadius of worldPos (so re-clicking an
+    /// occupied spot swaps it instead of stacking a duplicate on top), or adds a new entry if
+    /// the spot is empty. maxCount enforces PlayerSpawn's 4-player cap on the add path only --
+    /// replacing an existing spawn never changes the count.</summary>
+    private void PlaceOrReplace<T>(List<T> list, Func<T, Vector3> getPos, Vector3 target, Func<T> makeItem, int maxCount = int.MaxValue)
     {
+        const float pickRadius = 1f;
+
+        int existingIndex = -1;
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (Vector3.Distance(getPos(list[i]), target) <= pickRadius)
+            {
+                existingIndex = i;
+                break;
+            }
+        }
+
+        if (existingIndex < 0)
+        {
+            if (list.Count >= maxCount) return;
+
+            T item = makeItem();
+            Commands.Run(new ActionCommand(
+                execute: () => { list.Add(item); RefreshWorldObjectVisuals(); },
+                undo: () => { list.Remove(item); RefreshWorldObjectVisuals(); }));
+            return;
+        }
+
+        T previous = list[existingIndex];
+        T replacement = makeItem();
         Commands.Run(new ActionCommand(
-            execute: () => { list.Add(item); RefreshWorldObjectVisuals(); },
-            undo: () => { list.Remove(item); RefreshWorldObjectVisuals(); }));
+            execute: () => { list[existingIndex] = replacement; RefreshWorldObjectVisuals(); },
+            undo: () => { list[existingIndex] = previous; RefreshWorldObjectVisuals(); }));
     }
 
     private void EraseNearestWorldObject(Vector3 worldPos)
@@ -510,6 +547,7 @@ public class LevelEditorController : MonoBehaviour
 
         Mode = EditorMode.Preview;
         editorCamera.gameObject.SetActive(false);
+        if (pauseCanvas != null) pauseCanvas.SetActive(false);
 
         Vector3 spawnPos = Blueprint.PlayerSpawns.Count > 0
             ? Blueprint.PlayerSpawns[0].ToVector3() + Vector3.up
@@ -529,6 +567,7 @@ public class LevelEditorController : MonoBehaviour
         _activePreview = null;
 
         editorCamera.gameObject.SetActive(true);
+        if (pauseCanvas != null) pauseCanvas.SetActive(true);
         Mode = EditorMode.Tiles;
     }
 }

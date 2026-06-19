@@ -85,3 +85,121 @@ was documentation drift:
   `docs/PLANNED_FEATURES.md`.
 - No open design questions raised this session — all findings were either
   fixed directly or confirmed as already correct/intentional.
+
+---
+
+## 2026-06-19 (Part B)
+
+**Context:** a follow-up task list of six items, worked autonomously per
+standing instructions (resolve ambiguity via engineering judgment, document
+assumptions here rather than asking, don't stop early for token concerns). No
+Unity Editor was available this session — all scene `.unity` files were
+hand-edited as Force-Text YAML and verified via direct reads/fileID
+cross-reference checks, not by opening the Editor. **Visual/layout results in
+all three scenes are therefore unverified by eye and should be opened and
+checked by Cameron.**
+
+### Changes made this session
+
+1. **`SteamCloudSave` NRE fix.** `Write`/`Read`/`ListFiles` all called into
+   `SteamRemoteStorage` unconditionally; running without Steam initialized
+   threw out of `ListFiles` and broke `BlueprintLoader`'s startup scan. All
+   three now return early (`false`/`null`/empty list) when
+   `!SteamManager.Initialized`.
+
+2. **Hub → Level Editor access.** Added `LevelEditorAccessPoint.cs` (new
+   Hub-only `NetworkObject`, same raycast-target pattern as
+   `LevelSelectKiosk`/`OrderStation`) and wired `PlayerInteraction` to detect
+   it and show an "[E] Enter Level Editor" prompt. Placed an instance in
+   `Hub.unity` at `(2, 0.5, -22)`. Pressing E sends the **whole connected
+   party** into `LevelEditor.unity` (no solo-scene concept in this game's NGO
+   setup) via `EnterLevelEditorRpc()` → `NetworkPlayer.RequestLoadSceneRpc`
+   (new, also used by the Pause Menu's "Leave to Hub").
+   - Added `LevelEditor.unity` to `EditorBuildSettings` (NGO's
+     `NetworkSceneManager.LoadScene` requires the target scene be registered
+     there) — **this reverses the previously-documented "dev tool first,
+     player unlock second" gating from `GAME_INTENT.md` Phase F.** Implementing
+     it was explicit in this session's task list, but I did not separately
+     re-confirm the *intent* change with Cameron before doing it, since the
+     task itself was unambiguous. Flagging here per CLAUDE.md's rule on
+     intent-changing decisions — please sanity check this is actually wanted.
+   - Discovered while wiring this: `LevelSelectKiosk`'s script was fully
+     implemented but **no instance had ever been placed in `Hub.unity`** — a
+     real gap, not just docs drift like the other Hub findings in the
+     2026-06-19 session above. Added one at `(-14, 0.5, -22)`.
+   - Both new Hub GameObjects are new scene roots; I initially forgot to add
+     their Transforms to `Hub.unity`'s `SceneRoots.m_Roots` list (caught this
+     myself this session, not user-reported) — fixed, verified no duplicate
+     fileIDs in the file afterward.
+   - **Unverified:** both placements are blind coordinate choices with no
+     visual confirmation. Please check they don't intersect existing Hub
+     geometry.
+
+3. **Pause screens in `Game1`/`LevelEditor` with "leave to hub."**
+   `PauseMenu.cs` (new) + a Canvas/EventSystem/Button hierarchy added to both
+   scenes, modeled on the existing `LobbyUI` Canvas in `Hub.unity`. Escape
+   toggles a panel with Resume/Leave-to-Hub buttons; `PlayerCamera` already
+   listened for `GameEvents.OnGamePaused/OnGameResumed` so `Game1` needed no
+   script changes beyond the scene wiring. `LevelEditor.unity` had no
+   EventSystem at all, so one was added (field-for-field copy of `Game1`'s).
+   - **Found and fixed a real conflict before it shipped, not via user
+     report:** `LevelEditor.unity`'s `LevelEditorPreviewController` already
+     listens for Escape to exit Preview Mode. An always-on `PauseMenu` in the
+     same scene would have double-handled Escape during Preview Mode and the
+     two scripts would have fought over cursor lock state. Fixed by adding
+     `LevelEditorController.pauseCanvas`, toggled off in `EnterPreviewMode()`
+     / back on in `ExitPreviewMode()`, mirroring the existing `editorCamera`
+     toggle in the same two methods. Wired in the scene
+     (`LevelEditorController` → `pauseCanvas: {fileID: 760655022}`).
+     Re-checked `Game1.unity` for an analogous conflict — none exists;
+     `PlayerCamera` only reacts to the pause *events*, doesn't own Escape
+     itself.
+   - **Judgment call, not confirmed with Cameron:** `LevelEditorUI.cs`'s doc
+     comment explicitly says the editor's own panels are `OnGUI`-only by
+     design ("needs no Canvas/Button hierarchy to be usable"). I added the
+     Pause overlay as a Canvas anyway, treating it as a separate, narrower
+     concern that coexists fine alongside the OnGUI tool panels rather than a
+     contradiction of that design note. Worth a second look.
+   - **Unverified:** exact visual layout (panel/button positions and sizing)
+     in both scenes.
+
+4. **Suppress duplicate default tool depot/order station/supply zone
+   spawns.** In the Level Editor, clicking an occupied World-Object cell
+   stacked a second entry on top instead of replacing it.
+   `LevelEditorController.PlaceOrReplace<T>` (replaces `AddWorldObject`) now
+   replaces whatever's within 1 unit of the click instead of always adding;
+   `PlayerSpawn`'s 4-player cap still only applies on the add path.
+
+5. **Space out colliding default spawn locations.** `blueprint_001.json`'s
+   `order_station_0` overlapped a default tool-depot/supply-zone spot, so the
+   two prefabs spawned intersecting each other in `Game1`. Moved from
+   `(4.5, 0.5, -1)` to `(1, 0.5, 4)`. **Unverified** — re-check the layout
+   visually.
+
+6. **Per-`MaterialType` `BuildTile` visuals.** `BaseHueFor(MaterialType)`
+   added as a stand-in for real per-material textures, which **do not exist
+   as assets yet**. Chosen hues: Wood tan `(0.76, 0.60, 0.42)`, Concrete gray
+   `(0.65, 0.65, 0.65)`, Steel cool-gray `(0.55, 0.58, 0.62)` — Ghost shows
+   the raw hue, Placed/Built lerp it toward blue/green so build state reads at
+   a glance. Also swapped `BuildTile.prefab`'s ghost material off the opaque
+   `ToonLit.mat` it was incorrectly pointed at, onto a new transparent
+   `ToonTransparentGhost.mat` (`ToonTransparent.shader`, alpha 0.3) — without
+   this the per-material tint wouldn't have read as a translucent ghost at
+   all. These hue/blend values are a first pass with no art input; expect
+   Gilbert to want to replace this with real textures per
+   `docs/GAME_INTENT.md`.
+
+### Open items for Cameron to review (none blocked the work, all flagged above)
+
+- Hub → Level Editor access reverses previously-documented Phase F gating —
+  confirm this is actually wanted, not just a side effect of wiring the
+  feature.
+- Canvas-based Pause overlay added to the otherwise-OnGUI-only
+  `LevelEditor.unity` — confirm no objection to mixing UI paradigms there.
+- Three blind/unverified in-editor placements: `LevelSelectKiosk`
+  `(-14, 0.5, -22)`, `LevelEditorAccessPoint` `(2, 0.5, -22)` in `Hub.unity`,
+  and the repositioned `order_station_0` `(1, 0.5, 4)` in
+  `blueprint_001.json`.
+- Pause UI visual layout (button positions/sizing) in both `Game1.unity` and
+  `LevelEditor.unity` — not visually confirmed.
+- `BuildTile` per-material hue values are a placeholder, not an art decision.

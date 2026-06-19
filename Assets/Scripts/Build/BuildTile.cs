@@ -29,6 +29,15 @@ public class BuildTile : NetworkBehaviour
     [SerializeField] private Color eligibleColor = new(1f, 1f, 1f, 0.5f);
     [SerializeField] private Color ineligibleColor = new(1f, 1f, 1f, 0.15f);
 
+    [Header("Per-material hue -- ghost shows the raw hue, Placed/Built lerp toward blue/green")]
+    [SerializeField] [Range(0f, 1f)] private float placedBlueBlend = 0.5f;
+    [SerializeField] [Range(0f, 1f)] private float builtGreenBlend = 0.5f;
+
+    // Cached MeshRenderers on placedMaterialVisual/builtVisual -- both GameObjects carry a
+    // MeshRenderer directly on their own root, so no extra Inspector fields are needed.
+    private MeshRenderer _placedRenderer;
+    private MeshRenderer _builtRenderer;
+
     [Header("Progress Bar -- world space canvas")]
     [SerializeField] private GameObject progressBarRoot;
     [SerializeField] private RectTransform progressFill;
@@ -79,6 +88,9 @@ public class BuildTile : NetworkBehaviour
 
         BuildSystem.Instance.RegisterTile(GridPosition, this);
 
+        if (placedMaterialVisual != null) _placedRenderer = placedMaterialVisual.GetComponent<MeshRenderer>();
+        if (builtVisual != null) _builtRenderer = builtVisual.GetComponent<MeshRenderer>();
+
         _state.OnValueChanged += OnStateChanged;
         _buildProgress.OnValueChanged += (_, val) => UpdateProgressBar(val);
 
@@ -125,22 +137,39 @@ public class BuildTile : NetworkBehaviour
     private void RefreshVisual()
     {
         bool eligible = BuildSystem.Instance.IsEligible(this);
+        Color hue = BaseHueFor(RequiredMaterial);
 
         if (ghostRenderer != null)
         {
             ghostRenderer.enabled = _state.Value == TileState.Empty;
-            ghostRenderer.material.color = eligible ? eligibleColor : ineligibleColor;
+            float alpha = eligible ? eligibleColor.a : ineligibleColor.a;
+            ghostRenderer.material.color = new Color(hue.r, hue.g, hue.b, alpha);
         }
 
         if (placedMaterialVisual != null)
             placedMaterialVisual.SetActive(_state.Value == TileState.MaterialPlaced);
+        if (_placedRenderer != null)
+            _placedRenderer.material.color = Color.Lerp(hue, Color.blue, placedBlueBlend);
 
         if (builtVisual != null)
             builtVisual.SetActive(_state.Value == TileState.Built);
+        if (_builtRenderer != null)
+            _builtRenderer.material.color = Color.Lerp(hue, Color.green, builtGreenBlend);
 
         if (progressBarRoot != null)
             progressBarRoot.SetActive(_state.Value == TileState.MaterialPlaced && _buildProgress.Value > 0f);
     }
+
+    /// <summary>Stand-in for real per-material textures (none exist yet -- see
+    /// docs/SESSION.md). Placed/Built tint this hue toward blue/green; Ghost shows it raw
+    /// at the eligible/ineligible alpha.</summary>
+    private static Color BaseHueFor(MaterialType material) => material switch
+    {
+        MaterialType.Wood     => new Color(0.76f, 0.60f, 0.42f),
+        MaterialType.Concrete => new Color(0.65f, 0.65f, 0.65f),
+        MaterialType.Steel    => new Color(0.55f, 0.58f, 0.62f),
+        _                     => new Color(0.8f, 0.8f, 0.8f),
+    };
 
     private void UpdateProgressBar(float elapsed)
     {

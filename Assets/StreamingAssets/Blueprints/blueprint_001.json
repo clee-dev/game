@@ -28,7 +28,7 @@
   ],
 
   "orderStations": [
-    { "id": "order_station_0", "worldPosition": { "x": 4.5, "y": 0.5, "z": -1 } }
+    { "id": "order_station_0", "worldPosition": { "x": 1, "y": 0.5, "z": 4 } }
   ],
 
   "toolDepots": [
