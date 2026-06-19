@@ -268,7 +268,11 @@ public class PlayerInteraction : NetworkBehaviour
     {
         if (_openKioskMenuTarget == null) return;
 
-        _openKioskMenuTarget.SelectBlueprintRpc(_openKioskMenuTarget.IdAt(index));
+        if (_openKioskMenuTarget.IsLevelEditorOption(index))
+            _openKioskMenuTarget.EnterLevelEditorRpc();
+        else
+            _openKioskMenuTarget.SelectBlueprintRpc(_openKioskMenuTarget.IdAt(index));
+
         CloseKioskMenu();
     }
 

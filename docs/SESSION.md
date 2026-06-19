@@ -470,3 +470,98 @@ summary yet but add that to any relevant documentation already existing."
 - **Unverified:** layout/positioning of the new summary panel, and that
   clicking "Return to Hub" actually works end-to-end — please playtest both
   the success and timer-expiry paths.
+
+---
+
+## 2026-06-19 (Part E)
+
+**Context from Cameron:** three reported bugs — (1) leaving a blueprint level
+back to the Hub brings the whole level along with the player, only the
+players should return; (2) after returning to the Hub, the camera can't be
+moved at all, mouse input does nothing; (3) the Level Editor staging area
+should also be reachable from the kiosk terminal, not just the standalone
+access point. No Unity Editor or C# compiler available this session either —
+all changes hand-verified by direct read, **not compiled or opened in-Editor.**
+
+### Bug 1 — level geometry follows players back to Hub (fixed)
+
+Root cause: every dynamically-spawned `NetworkObject` in a level
+(`BuildTile`/`OrderStation` in `BuildSystem.SpawnFromBlueprint()`, plus the
+materials/tools spawned at runtime by `SupplyZoneSpawner`/`ToolDepotSpawner`/
+`OrderQueueSystem`) never set `NetworkObject.DestroyWithScene`. NGO's default
+for a *dynamically* spawned object (as opposed to one placed directly in the
+scene file) is `DestroyWithScene = false` — intentional upstream behavior so
+things like held items or player objects survive a scene change by migrating
+into the next active scene instead of being destroyed. Since nothing in this
+codebase ever opted out of that default, the entire level's tiles, depots,
+stations, and any loose materials/tools rode along into `Hub` on every
+`LoadSceneMode.Single` transition. Fixed by setting `DestroyWithScene = true`
+immediately after every `Spawn()` call in those four files. Scene-placed
+`NetworkObject`s (`LevelTimer`, `LevelEditorBlueprintSync`, `LevelSelectKiosk`,
+`LevelEditorAccessPoint`, `StartingAreaTrigger`, `OrderQueueSystem` itself)
+were never part of this bug — `IsSceneObject == true` objects are always
+destroyed with their scene regardless of this flag.
+
+### Bug 2 — mouse/camera dead after returning to Hub (fixed)
+
+Root cause: `PlayerCamera` only re-locks the cursor and re-enables mouse look
+when `GameEvents.OnGameStarted` fires. That event was only ever fired from
+`HubPlayerState.ApplySpawnState`, gated on its `_isSpawnedIn` `NetworkVariable`
+actually *changing* value — true on a player's first spawn into Hub, but the
+player's `NetworkObject` is never destroyed/recreated across scene loads, so
+on a return trip from `Game1`/`LevelEditor` (`PauseMenu.LeaveToHub` /
+`LevelSummaryUI.ReturnToHub`, both of which unlock the cursor for their own
+button clicks and never re-lock it), `_isSpawnedIn` was already `true` and
+never changed again — nothing re-fired `OnGameStarted`, so the cursor and
+mouse look stayed dead indefinitely. Fixed by having
+`NetworkPlayer.OnActiveSceneChanged` re-fire `GameEvents.FireGameStarted()`
+itself whenever `IsOwner && current.name == "Hub"`, independent of
+`HubPlayerState`'s networked spawn-state tracking — this fires every time the
+owner's active scene becomes Hub, not just the first time.
+
+### Bug 3 — Level Editor not reachable from the kiosk (added)
+
+`LevelSelectKiosk`'s menu gained a trailing "Enter Level Editor" option after
+the scanned blueprint list (`OptionCount` is now `_availableBlueprintIds.Length
++ 1`; new `IsLevelEditorOption(index)` is true for the last row). Selecting it
+calls a new `LevelSelectKiosk.EnterLevelEditorRpc()` — the same one-line
+`NetworkManager.Singleton.SceneManager.LoadScene("LevelEditor", LoadSceneMode.Single)`
+`LevelEditorAccessPoint.EnterLevelEditorRpc()` already does, duplicated rather
+than shared so each Hub terminal stays self-contained (matching how
+`LevelEditorAccessPoint` and `LevelSelectKiosk` were already independent of
+each other). `PlayerInteraction.SelectKioskOption()` branches on
+`IsLevelEditorOption(index)`. **Judgment call:** kept the standalone
+`LevelEditorAccessPoint` terminal in place rather than removing it — Cameron's
+phrasing ("should be in the kiosk **as well**") read as additive, not a
+replacement. Flagging in case the intent was actually to consolidate down to
+one access point.
+
+### Changes made this session
+
+- `Assets/Scripts/Build/BuildSystem.cs`, `SupplyZoneSpawner.cs`,
+  `ToolDepotSpawner.cs`, `OrderQueueSystem.cs` — `DestroyWithScene = true` on
+  every dynamically-spawned `NetworkObject` (Bug 1).
+- `Assets/Scripts/NetworkPlayer.cs` — `OnActiveSceneChanged` re-fires
+  `GameEvents.FireGameStarted()` on every return to Hub, not just first spawn
+  (Bug 2).
+- `Assets/Scripts/Build/LevelSelectKiosk.cs` — new trailing "Enter Level
+  Editor" menu option + `EnterLevelEditorRpc()` (Bug 3).
+- `Assets/Scripts/PlayerInteraction.cs` — `SelectKioskOption()` branches to
+  the new RPC for that option.
+- `docs/ARCHITECTURE.md` — documented all three fixes in place (Build Tiles,
+  Player, Hub Blueprint-Select-and-Start Flow sections).
+
+### Open items for Cameron to review
+
+- **None of this session's changes have been compiled or run** — no Unity
+  Editor or C# compiler available. Please open the project and confirm it
+  still builds before relying on any of this.
+- Playtest Bug 1: enter `Game1` (or `LevelEditor`), leave to Hub via both the
+  Pause Menu and (for `Game1`) the Level Summary screen, confirm the Hub is
+  clean of any leftover tiles/stations/materials/tools.
+- Playtest Bug 2: same return trips, confirm mouse look and cursor lock work
+  immediately on arrival in Hub with no extra input needed.
+- Playtest Bug 3: confirm the kiosk's new last option enters the Level Editor
+  for both host and non-host clients, same as the standalone access point.
+- Confirm the "kept both access points" judgment call above is actually what
+  was wanted, not a half-step toward consolidating to one.

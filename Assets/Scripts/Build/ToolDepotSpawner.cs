@@ -84,7 +84,9 @@ public class ToolDepotSpawner : MonoBehaviour
     private void SpawnSlot(Slot slot)
     {
         var instance = Instantiate(slot.Prefab, transform.position, Quaternion.identity);
-        instance.GetComponent<NetworkObject>().Spawn();
+        var netObj = instance.GetComponent<NetworkObject>();
+        netObj.Spawn();
+        netObj.DestroyWithScene = true;
         slot.Current = instance;
         slot.CurrentPickup = instance.GetComponent<PhysicsPickup>();
     }

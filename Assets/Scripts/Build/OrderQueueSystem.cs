@@ -139,7 +139,9 @@ public class OrderQueueSystem : NetworkBehaviour
         {
             Vector3 offset = new Vector3(i * 0.5f, 0f, 0f);
             var instance = Instantiate(delivery.prefab, delivery.position + offset, Quaternion.identity);
-            instance.GetComponent<NetworkObject>().Spawn();
+            var netObj = instance.GetComponent<NetworkObject>();
+            netObj.Spawn();
+            netObj.DestroyWithScene = true;
         }
     }
 }

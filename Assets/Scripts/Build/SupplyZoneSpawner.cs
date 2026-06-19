@@ -44,7 +44,9 @@ public class SupplyZoneSpawner : MonoBehaviour
     private void SpawnOne()
     {
         var instance = Instantiate(materialPrefab, transform.position, Quaternion.identity);
-        instance.GetComponent<NetworkObject>().Spawn();
+        var netObj = instance.GetComponent<NetworkObject>();
+        netObj.Spawn();
+        netObj.DestroyWithScene = true;
         _current = instance;
     }
 }
