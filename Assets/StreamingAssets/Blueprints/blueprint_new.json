@@ -4,19 +4,19 @@
   "description": "",
   "scenery": "forest",
   "gridSize": {
-    "x": 10,
-    "y": 3,
-    "z": 10
+    "x": 18,
+    "y": 8,
+    "z": 11
   },
   "tiles": [
     {
       "id": "tile_001",
       "position": {
-        "x": 4,
+        "x": 3,
         "y": 0,
-        "z": 8
+        "z": 5
       },
-      "type": "window",
+      "type": "foundation",
       "requiredMaterial": "wood",
       "requiredTool": "hammer",
       "health": 100
@@ -26,9 +26,9 @@
       "position": {
         "x": 4,
         "y": 0,
-        "z": 7
+        "z": 5
       },
-      "type": "window",
+      "type": "foundation",
       "requiredMaterial": "wood",
       "requiredTool": "hammer",
       "health": 100
@@ -36,11 +36,11 @@
     {
       "id": "tile_003",
       "position": {
-        "x": 6,
+        "x": 5,
         "y": 0,
-        "z": 7
+        "z": 5
       },
-      "type": "window",
+      "type": "foundation",
       "requiredMaterial": "wood",
       "requiredTool": "hammer",
       "health": 100
@@ -48,11 +48,11 @@
     {
       "id": "tile_004",
       "position": {
-        "x": 5,
+        "x": 6,
         "y": 0,
-        "z": 6
+        "z": 5
       },
-      "type": "window",
+      "type": "foundation",
       "requiredMaterial": "wood",
       "requiredTool": "hammer",
       "health": 100
@@ -60,9 +60,9 @@
     {
       "id": "tile_005",
       "position": {
-        "x": 8,
+        "x": 7,
         "y": 0,
-        "z": 2
+        "z": 5
       },
       "type": "foundation",
       "requiredMaterial": "wood",
@@ -72,23 +72,11 @@
     {
       "id": "tile_006",
       "position": {
-        "x": 8,
-        "y": 0,
-        "z": 3
+        "x": 3,
+        "y": 1,
+        "z": 5
       },
-      "type": "foundation",
-      "requiredMaterial": "wood",
-      "requiredTool": "hammer",
-      "health": 100
-    },
-    {
-      "id": "tile_007",
-      "position": {
-        "x": 7,
-        "y": 0,
-        "z": 4
-      },
-      "type": "foundation",
+      "type": "floor",
       "requiredMaterial": "wood",
       "requiredTool": "hammer",
       "health": 100
@@ -96,11 +84,11 @@
     {
       "id": "tile_008",
       "position": {
-        "x": 6,
-        "y": 0,
-        "z": 4
+        "x": 4,
+        "y": 1,
+        "z": 5
       },
-      "type": "foundation",
+      "type": "floor",
       "requiredMaterial": "wood",
       "requiredTool": "hammer",
       "health": 100
@@ -108,11 +96,11 @@
     {
       "id": "tile_009",
       "position": {
-        "x": 6,
-        "y": 0,
-        "z": 3
+        "x": 5,
+        "y": 1,
+        "z": 5
       },
-      "type": "foundation",
+      "type": "floor",
       "requiredMaterial": "wood",
       "requiredTool": "hammer",
       "health": 100
@@ -120,11 +108,11 @@
     {
       "id": "tile_010",
       "position": {
-        "x": 7,
-        "y": 0,
-        "z": 3
+        "x": 6,
+        "y": 1,
+        "z": 5
       },
-      "type": "foundation",
+      "type": "floor",
       "requiredMaterial": "wood",
       "requiredTool": "hammer",
       "health": 100
@@ -133,10 +121,190 @@
       "id": "tile_011",
       "position": {
         "x": 7,
+        "y": 1,
+        "z": 5
+      },
+      "type": "floor",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_012",
+      "position": {
+        "x": 3,
+        "y": 2,
+        "z": 5
+      },
+      "type": "wall",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_013",
+      "position": {
+        "x": 4,
+        "y": 2,
+        "z": 5
+      },
+      "type": "window",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_014",
+      "position": {
+        "x": 5,
+        "y": 2,
+        "z": 5
+      },
+      "type": "door",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_015",
+      "position": {
+        "x": 6,
+        "y": 2,
+        "z": 5
+      },
+      "type": "column",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_016",
+      "position": {
+        "x": 7,
+        "y": 2,
+        "z": 5
+      },
+      "type": "furniture",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_026",
+      "position": {
+        "x": 7,
         "y": 0,
-        "z": 2
+        "z": 4
       },
       "type": "foundation",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_025",
+      "position": {
+        "x": 6,
+        "y": 0,
+        "z": 4
+      },
+      "type": "foundation",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_024",
+      "position": {
+        "x": 5,
+        "y": 0,
+        "z": 4
+      },
+      "type": "foundation",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_023",
+      "position": {
+        "x": 4,
+        "y": 0,
+        "z": 4
+      },
+      "type": "foundation",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_022",
+      "position": {
+        "x": 3,
+        "y": 0,
+        "z": 4
+      },
+      "type": "foundation",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_027",
+      "position": {
+        "x": 3,
+        "y": 1,
+        "z": 4
+      },
+      "type": "floor",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_028",
+      "position": {
+        "x": 5,
+        "y": 1,
+        "z": 4
+      },
+      "type": "floor",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_029",
+      "position": {
+        "x": 4,
+        "y": 1,
+        "z": 4
+      },
+      "type": "floor",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_030",
+      "position": {
+        "x": 6,
+        "y": 1,
+        "z": 4
+      },
+      "type": "floor",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_031",
+      "position": {
+        "x": 7,
+        "y": 1,
+        "z": 4
+      },
+      "type": "floor",
       "requiredMaterial": "wood",
       "requiredTool": "hammer",
       "health": 100
@@ -145,18 +313,7 @@
   "supplyZones": [],
   "orderStations": [],
   "toolDepots": [],
-  "playerSpawns": [
-    {
-      "x": 8.1046505,
-      "y": 0.0,
-      "z": 6.327908
-    },
-    {
-      "x": 10.5299683,
-      "y": 0.0,
-      "z": 1.96899843
-    }
-  ],
+  "playerSpawns": [],
   "contractDefaults": {
     "timeLimitSeconds": 300,
     "allowedMaterials": [
