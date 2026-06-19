@@ -279,6 +279,34 @@ the "Complete!" message while running out the clock triggers "Time's Up".
 
 ---
 
+### Level Summary UI
+
+`LevelSummaryUI` — plain `MonoBehaviour` on `SummaryCanvas` in `Game1.unity`
+(screen-space overlay, fileIDs in the `5300000` range). Subscribes to
+`GameEvents.OnLevelEnded` and pops up `summaryPanel` with `resultText`
+("Level Complete" / "Time's Up") and `completionText` (`N% Built`), unlocking the
+cursor so the player can click. `returnToHubButton` calls the local player's
+`NetworkPlayer.RequestLoadSceneRpc("Hub")` — the exact same relay
+`PauseMenu.LeaveToHub` uses, since `NetworkSceneManager.LoadScene` is server-only —
+falling back to loading `MainMenu` directly if there's no `NetworkManager` session
+(e.g. opened standalone in-Editor).
+
+**`blameSummaryRoot` — reserved, not implemented.** A `BlameSummaryRoot`
+RectTransform sits inside `SummaryPanel`, inactive, with no content. This is
+where the planned blame summary (who made the most mistakes, who carried the
+most materials, death count, etc. — see `docs/PLANNED_FEATURES.md`, "Level
+Summary") will go once that's built. Don't repurpose this GameObject for
+anything else; it's deliberately empty space reserved for that feature.
+
+**Unverified — no Unity Editor available this session:** `SummaryCanvas`'s full
+hierarchy (panel, result/completion text, button, reserved blame-summary slot)
+was hand-authored as Force-Text YAML, same caveat as `LevelTimer`/`TimerCanvas`
+above. Please open `Game1.unity` and confirm layout, and playtest that both the
+success and timer-expiry paths show the right text and that "Return to Hub"
+actually returns the whole party to `Hub.unity`.
+
+---
+
 ### Supply & Tool Depots
 
 `SupplyZoneSpawner` / `ToolDepotSpawner` — plain (non-NetworkObject) MonoBehaviours,

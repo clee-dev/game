@@ -432,3 +432,41 @@ write-up. Summary:
 - No compiler available either (`unity`/`dotnet`/`mcs`/`csc` all absent from
   this environment) — all new C# was manually re-read for syntax errors, not
   compiled. Please build once before relying on this.
+
+### Follow-up: Level Summary UI
+
+**Context:** "once the level completes event is triggered it should bring up
+a level summary UI which eventually will have stuff like a blame summary on
+who made the most mistakes or did the most or keeps track of deaths etc.
+there should be a button to go back to the hub. don't worry about the blame
+summary yet but add that to any relevant documentation already existing."
+
+- **New:** `LevelSummaryUI` (`Assets/Scripts/Build/LevelSummaryUI.cs`) —
+  listens for `GameEvents.OnLevelEnded` (the same event `LevelTimerHUD`
+  already listens to), shows a panel with the result ("Level Complete" /
+  "Time's Up") and completion %, unlocks the cursor. "Return to Hub" button
+  uses the exact same `NetworkPlayer.RequestLoadSceneRpc("Hub")` relay
+  `PauseMenu.LeaveToHub` uses (`NetworkSceneManager.LoadScene` is server-only,
+  so clients route through their own `NetworkPlayer`), falling back to
+  `MainMenu` if there's no NGO session.
+- **Per explicit instruction, did NOT build the blame summary itself** (who
+  made the most mistakes, deaths, etc.) — no stat-tracking exists anywhere in
+  the codebase yet for this, and what counts as a "mistake" is an open design
+  question, not mine to assume. Instead added a reserved, empty,
+  inactive-by-default `BlameSummaryRoot` `RectTransform` inside `SummaryPanel`
+  and documented it as the landing spot in both `docs/ARCHITECTURE.md`
+  ("Level Summary UI" section) and `docs/PLANNED_FEATURES.md` (new "Level
+  Summary" section, with open questions about what counts as a mistake and
+  where per-player stat tracking should live).
+- **`Game1.unity` scene wiring (unverified, no Editor):** added
+  `SummaryCanvas` → `SummaryPanel` → `ResultText` / `CompletionText` /
+  `ReturnToHubButton` / `BlameSummaryRoot` (fileIDs `5300010`–`5300071`),
+  modeled on the existing `PausePanel`/`ResumeButton`/`LeaveToHubButton`
+  hierarchy for consistent button/Image/Button component wiring. Added to
+  `SceneRoots.m_Roots`. Verified zero duplicate fileIDs afterward and that
+  every new fileID resolves to an actual document in the file.
+- New `.meta` file hand-created: `LevelSummaryUI.cs.meta`, guid
+  `ed1a624f94f847de916db0b166c9d32c`.
+- **Unverified:** layout/positioning of the new summary panel, and that
+  clicking "Return to Hub" actually works end-to-end — please playtest both
+  the success and timer-expiry paths.

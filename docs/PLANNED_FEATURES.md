@@ -205,11 +205,52 @@ expires. Outcome (success/failure) determines payout.
   Built) and `LevelTimer` expiry (forced) both route through
   `BuildSystem.EvaluateCompletion`, which fires `GameEvents.OnLevelEnded(bool
   success, float completionPercent)`
+- Scene transition back to the Hub — manual, via the Level Summary UI's
+  "Return to Hub" button (see Level Summary below), not automatic
 
 **Still to build:**
 - Payout calculation based on completion % and `CompletionThresholds` (a
   listener on `GameEvents.OnLevelEnded`, not yet written)
-- Scene transition back to contract selection (or Hub) after results
+
+---
+
+### Level Summary — partially built
+
+**What it is:** Screen shown when a level ends (`GameEvents.OnLevelEnded`),
+reporting the outcome and eventually a per-player "blame summary" (who made
+the most mistakes, who carried the most/least, death count, etc.), with a
+button to return to the Hub.
+
+**Built:**
+- `LevelSummaryUI` (`Assets/Scripts/Build/LevelSummaryUI.cs`) — listens for
+  `GameEvents.OnLevelEnded`, shows `resultText` ("Level Complete" / "Time's
+  Up") and `completionText` (`N% Built`), unlocks the cursor
+- `Return to Hub` button — relays through the local player's
+  `NetworkPlayer.RequestLoadSceneRpc("Hub")`, same mechanism `PauseMenu`'s
+  "Leave to Hub" uses
+- Scene wiring in `Game1.unity`: `SummaryCanvas` → `SummaryPanel` →
+  `ResultText` / `CompletionText` / `ReturnToHubButton`, hand-edited YAML,
+  **unverified in-Editor** — see `docs/SESSION.md`
+
+**Still to build — blame summary (explicitly deferred, not started):**
+- Per-player stat tracking during the level: mistakes (wrong material placed?
+  wasted material? TBD what counts as a "mistake"), deaths, materials
+  carried/delivered, builds completed, etc. — none of this is tracked
+  anywhere yet, this needs new systems, not just UI
+- The actual blame summary display (leaderboard-style breakdown per player)
+- **Reserved slot:** `LevelSummaryUI.blameSummaryRoot` — an inactive, empty
+  `RectTransform` (`BlameSummaryRoot`, inside `SummaryPanel` in `Game1.unity`)
+  is where this goes once built. Don't repurpose this GameObject for anything
+  else.
+
+**Open questions:**
+- What exactly counts as a "mistake" for blame purposes? (wrong material on a
+  tile, wasted/dropped materials, time spent idle, etc. — needs Cameron's call)
+- Where does per-player stat tracking live — on `NetworkPlayer` itself, or a
+  separate stats-tracking NetworkBehaviour?
+- Does the blame summary need to be visible to all players at once (a single
+  synced ranking) or can each client compute it locally from already-synced
+  state?
 
 ---
 
