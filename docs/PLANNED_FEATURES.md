@@ -53,23 +53,6 @@ fallback but the terminal is the intended path.
 
 ---
 
-### Hub Spawn Points
-
-**What it is:** Designated spawn positions in the Hub so players don't overlap at
-the origin.
-
-**Decisions made:**
-- One spawn point per player slot (up to 4)
-- `HubPlayerState` assigns spawn point based on `OwnerClientId`
-
-**What to build:**
-- 4 `Transform` positions in Hub scene
-- `HubSpawnPoints` component that `HubPlayerState` reads on spawn
-
-**Dependencies:** `HubPlayerState` (already exists, already references `HubSpawnPoints`)
-
----
-
 ## Phase A — Complete the Material Loop
 
 ### Concrete Material
@@ -326,16 +309,14 @@ More modifiers map onto chaos events from the full GDD list.
 
 ## Phase F — Generation and Editor
 
-### Level Editor (Scene Wiring)
+### Level Editor (Build Settings / Player Access)
 
-The Level Editor scripts are fully written (`Assets/Scripts/LevelEditor/`). The
-scene and GameObject wiring do not exist yet. This is a manual Unity Editor step.
-See `docs/wiring/` for the pending wiring task.
-
-**What still needs to happen:**
-- Create `LevelEditor.unity` scene
-- Place and configure all LevelEditor GameObjects per the wiring doc
-- Connect Save to `StreamingAssets/Blueprints/` and Steam Cloud
+`LevelEditor.unity` is built and fully wired (scripts + scene + GameObjects).
+Saves already write to `StreamingAssets/Blueprints/` and Steam Cloud, so
+anything saved there is immediately selectable from the Hub kiosk. Not yet
+done: adding the scene to `EditorBuildSettings` for in-game/player access.
+Per `GAME_INTENT.md` Phase F ("dev tool first, player unlock second"), this is
+intentionally deferred, not a gap to fix now.
 
 ---
 

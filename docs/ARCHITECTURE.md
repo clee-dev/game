@@ -27,8 +27,10 @@ Boot.unity → MainMenu.unity → Hub.unity → Game1.unity
   falling back to its own Inspector default) and spawns tiles, supply zones, tool
   depots, and order stations server-side.
 
-`LevelEditor.unity` does not yet exist as a scene — the Level Editor scripts are
-written but scene/GameObject wiring is a manual step (see `docs/wiring/`).
+`LevelEditor.unity` exists and is fully wired (`LevelEditorController`,
+`LevelEditorUI`, `EditorGridRenderer`, `LevelEditorCamera` all configured). It is
+not yet in `EditorBuildSettings` — intentional per `GAME_INTENT.md` Phase F
+("dev tool first, player unlock second"), not a gap.
 
 ---
 
@@ -96,6 +98,15 @@ based on `IsOwner`. Does not assume prefab default state.
 `HubPlayerState` — Hub-specific spawn handling. Positions player at a
 `HubSpawnPoints` location.
 
+`HubSpawnPoints` — 4 `Transform` positions, fully wired in `Hub.unity`. Confirmed
+built and assigned; not a gap.
+
+**Fixed (this session):** `Player.prefab`'s `HubPlayerState.cam` field was
+unassigned (`fileID: 0`). Pointed it at the same `Camera` component already
+referenced by `NetworkPlayer.playerCam` and `PlayerInteraction.playerCamera`.
+Low severity — `NetworkPlayer` already gates the camera by `IsOwner`
+independently — but was incorrect.
+
 ---
 
 ### Interaction & Pickup
@@ -138,6 +149,13 @@ Currently defined but not implemented:
 `ToolDepotSpawner` — server-only. `toolPrefabs` array + `Configure(string[]
 toolTypeNames)`. One depot can offer multiple tool types per blueprint. Tool types
 with no matching prefab are skipped with a warning.
+
+**Fixed (this session):** `ToolDepotSpawner.prefab` still serialized the old
+pre-refactor scalar field `toolPrefab` instead of the current `toolPrefabs[]`
+array. The Hammer reference was orphaned (Unity does not migrate a renamed
+`[SerializeField]` automatically), so `toolPrefabs` was empty and no tool ever
+spawned at the depot in `Game1`. Re-serialized as a single-entry array pointing
+at the same Hammer prefab.
 
 ---
 
@@ -235,8 +253,10 @@ player builds, needed for Play Mode preview).
 Saves write to `StreamingAssets/Blueprints/` and Steam Cloud simultaneously, so
 anything saved is immediately selectable from the Hub kiosk.
 
-**The `LevelEditor.unity` scene does not yet exist.** Scripts are written; scene and
-GameObject wiring is a manual step. See `docs/wiring/`.
+**The `LevelEditor.unity` scene exists and is fully wired.** Saves write to
+`StreamingAssets/Blueprints/` and Steam Cloud, so anything saved there is
+immediately selectable from the Hub `LevelSelectKiosk` with zero extra work
+(`BlueprintLoader.GetAllBlueprintIds()` already unifies both sources).
 
 ---
 
@@ -321,6 +341,11 @@ Designed but not yet in code:
 
 ## Unity 6 Gotchas
 
+- Renaming or retyping a `[SerializeField]` (e.g. a scalar field to an array)
+  does **not** migrate existing serialized references in prefabs/scenes unless
+  `[FormerlySerializedAs]` is used. The old value silently becomes orphaned —
+  no compile error, no obvious runtime crash, just missing behavior. Audit
+  prefabs after any field rename/retype refactor.
 - `ClientNetworkTransform` Authority Mode must be **Owner** in the Inspector.
   Code override alone is ignored.
 - Use `[Rpc(SendTo.Server, InvokePermission = ...)]` not deprecated `[ServerRpc]`.

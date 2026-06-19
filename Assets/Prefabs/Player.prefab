@@ -354,7 +354,7 @@ MonoBehaviour:
   characterController: {fileID: 6547845995429739131}
   playerController: {fileID: 4165502557006134689}
   playerCamera: {fileID: 4271986051621054946}
-  cam: {fileID: 0}
+  cam: {fileID: 5451394608381476393}
   offscreenPosition: {x: 0, y: -200, z: 0}
 --- !u!1 &1401656716224589918
 GameObject:
