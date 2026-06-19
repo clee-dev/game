@@ -199,26 +199,27 @@ public class LevelEditorController : MonoBehaviour
     // -------------------------------------------------------------------------
 
     public bool CanPlaceTileType(TileType type, Vector3Int pos) =>
-        TileStructuralRules.HasSupport(type, pos, Blueprint.Tiles.ContainsKey);
+        TileStructuralRules.HasSupport(type, pos, GetBlueprintTypeAt);
+
+    private TileType? GetBlueprintTypeAt(Vector3Int pos) =>
+        Blueprint.Tiles.TryGetValue(pos, out TileData t) ? BlueprintEnums.ParseTileType(t.type) : (TileType?)null;
 
     private static string BuildPlacementWarning(TileType type)
     {
-        switch (type)
-        {
-            case TileType.Floor:
-            case TileType.Wall:
-            case TileType.Column:
-            case TileType.Furniture:
-                return $"Cannot place {type} here -- needs a tile below it first.";
+        if (type == TileType.Foundation)
+            return "Cannot place Foundation here -- it must rest on empty ground, not on top of another tile.";
 
-            case TileType.Window:
-            case TileType.Door:
-            case TileType.Decor:
-                return $"Cannot place {type} here -- needs an adjacent tile to attach to.";
+        var below = TileStructuralRules.SupportsBelowFor(type).ToArray();
+        var adjacent = TileStructuralRules.SupportsAdjacentFor(type).ToArray();
 
-            default:
-                return $"Cannot place {type} here.";
-        }
+        if (below.Length > 0 && adjacent.Length > 0)
+            return $"Cannot place {type} here -- needs to be on top of {string.Join(" or ", below)}, or adjacent to {string.Join(" or ", adjacent)}.";
+        if (below.Length > 0)
+            return $"Cannot place {type} here -- needs to be on top of {string.Join(" or ", below)}.";
+        if (adjacent.Length > 0)
+            return $"Cannot place {type} here -- needs to be adjacent to {string.Join(" or ", adjacent)}.";
+
+        return $"Cannot place {type} here.";
     }
 
     private void EraseTile(Vector3Int pos)

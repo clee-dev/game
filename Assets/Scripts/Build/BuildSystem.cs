@@ -127,12 +127,12 @@ public class BuildSystem : MonoBehaviour
     // -------------------------------------------------------------------------
 
     public bool IsEligible(BuildTile tile) =>
-        TileStructuralRules.HasSupport(tile.Type, tile.GridPosition, IsBuiltAt);
+        TileStructuralRules.HasSupport(tile.Type, tile.GridPosition, GetBuiltTypeAt);
 
-    private bool IsBuiltAt(Vector3Int pos)
+    private TileType? GetBuiltTypeAt(Vector3Int pos)
     {
         var tile = GetLiveTileAt(pos);
-        return tile != null && tile.State == TileState.Built;
+        return tile != null && tile.State == TileState.Built ? tile.Type : (TileType?)null;
     }
 
     /// <summary>
