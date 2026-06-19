@@ -46,4 +46,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::ToolDepotSpawner
   toolPrefabs:
   - {fileID: 3289289382423367029, guid: 456f92b2dbef5a14ea9ac9d2ab9d5b75, type: 3}
+  - {fileID: 3289289382423367029, guid: a1f5a2f4dac64754892624309c1c3e05, type: 3}
+  - {fileID: 3289289382423367029, guid: a5239071c0e5cf248851e238f1be0851, type: 3}
   respawnCooldown: 5
