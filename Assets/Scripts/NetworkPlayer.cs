@@ -61,6 +61,16 @@ public class NetworkPlayer : NetworkBehaviour
         // Level Summary screen, both of which unlock the cursor and never re-lock it.
         if (IsOwner && current.name == "Hub")
             GameEvents.FireGameStarted();
+
+        // ApplyComponentState() above disables playerCamera for passive scenes, but
+        // PlayerCamera.OnDisable() only unsubscribes from GameEvents -- it never frees the
+        // cursor. Without this, whatever lock state was active on the previous scene (e.g.
+        // freshly re-locked by the Hub branch above) carries into LevelEditor unchanged,
+        // leaving the cursor confined to screen center for its click-to-place UI. Call
+        // SetLookEnabled directly since it's a plain method call, unaffected by the
+        // component's enabled flag.
+        if (IsOwner && IsPassiveScene() && playerCamera != null)
+            playerCamera.SetLookEnabled(false);
     }
 
     [Rpc(SendTo.Owner)]

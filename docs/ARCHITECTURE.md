@@ -144,6 +144,23 @@ itself whenever `IsOwner && current.name == "Hub"`, independent of
 please confirm leaving to Hub from both `Game1` (Pause Menu and Level Summary)
 and `LevelEditor` restores mouse look immediately.
 
+**Fixed (Part F): cursor stuck locked in Level Editor, a direct regression
+from the fix above.** Re-locking the cursor on every Hub return meant the
+locked state now also carried, unbroken, into `LevelEditor` -- `ApplyComponentState()`
+disables the `playerCamera` component for `passiveScenes`, but
+`PlayerCamera.OnDisable()` only unsubscribes from `GameEvents`; it never calls
+`DisableMouseLook()`. `LevelEditorController` reads `Mouse.current.position`
+for placement raycasts, which only reports a real position once the OS cursor
+is free, so a locked cursor meant every placement click landed at screen
+center. Fixed by having `NetworkPlayer.OnActiveSceneChanged` also call
+`playerCamera.SetLookEnabled(false)` directly whenever `IsOwner &&
+IsPassiveScene()` -- symmetric to the Hub-entry branch above, and safe to call
+even though `playerCamera.enabled` is false (`SetLookEnabled` is a plain
+method call, not gated by `MonoBehaviour.enabled`). `LevelEditorPreviewController`
+(the in-editor walk-around preview) manages `Cursor.lockState` independently
+and doesn't touch `PlayerCamera`, so there's no conflict between the two.
+**Unverified in-Editor.**
+
 `HubPlayerState` — Hub-specific spawn handling. Positions player at a
 `HubSpawnPoints` location.
 

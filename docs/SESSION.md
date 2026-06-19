@@ -565,3 +565,64 @@ one access point.
   for both host and non-host clients, same as the standalone access point.
 - Confirm the "kept both access points" judgment call above is actually what
   was wanted, not a half-step toward consolidating to one.
+
+## 2026-06-19 (Part F)
+
+**Context from Cameron:** direct regression from Part E's Bug 2 fix — "when
+you go in to the level editor now, the cursor is not available. if you press
+pause, then it appears... when you click to place it only places in the
+center of the screen, likely from the player cursor." No Unity Editor or C#
+compiler available this session either — hand-verified by direct read only.
+
+### Root cause
+
+Part E's Bug 2 fix made `NetworkPlayer.OnActiveSceneChanged` re-fire
+`GameEvents.FireGameStarted()` on every return to Hub, which re-locks the
+cursor via `PlayerCamera.EnableMouseLook()`. That locked state now correctly
+persists when leaving Hub for `LevelEditor` — `ApplyComponentState()` disables
+the `playerCamera` component for `passiveScenes`, but `PlayerCamera.OnDisable()`
+only unsubscribes from `GameEvents`; it never calls `DisableMouseLook()`. So
+the cursor stayed locked to screen center the whole time the editor was open.
+`LevelEditorController.HandlePlacement()` reads `Mouse.current.position` to
+raycast placement (`LevelEditorController.cs:156`), which only reports a
+real cursor position when the OS cursor is actually free — confirming this
+was the click-only-registers-at-center symptom. Opening Pause unlocked the
+cursor as a side effect (`PauseMenu.Pause()` sets `Cursor.lockState = None`
+directly) without ever re-locking it, which is why pausing "fixed" it.
+
+Before Part E's fix, the cursor happened to stay unlocked across the
+Hub-return trip (the original Bug 2), and that broken state coincidentally
+carried into LevelEditor in the shape it needed. Fixing Bug 2 correctly
+removed that accident, exposing this gap.
+
+### Fix
+
+`NetworkPlayer.OnActiveSceneChanged` now also calls
+`playerCamera.SetLookEnabled(false)` directly whenever `IsOwner &&
+IsPassiveScene()` — symmetric to the existing Hub-entry branch that re-locks
+it. `SetLookEnabled` is a plain public method on `PlayerCamera`, callable
+regardless of the component's `enabled` flag, so this works even though
+`ApplyComponentState()` disables `playerCamera` for the same scene in the
+same call.
+
+Checked for conflicts: `LevelEditorPreviewController` (the in-editor
+walk-around preview mode) manages `Cursor.lockState` itself but is fully
+self-contained and unrelated to `PlayerCamera`/`NetworkPlayer` — no overlap.
+
+### Changes made this session
+
+- `Assets/Scripts/NetworkPlayer.cs` — `OnActiveSceneChanged` now unlocks the
+  cursor via `playerCamera.SetLookEnabled(false)` on entering any passive
+  scene (currently just `LevelEditor`).
+- `docs/ARCHITECTURE.md` — updated the Player section's Bug 2 note to cover
+  this follow-up.
+
+### Open items for Cameron to review
+
+- **Still not compiled or run.** Please confirm the project builds.
+- Playtest: enter the Level Editor from the Hub kiosk or the standalone
+  access point, confirm the cursor is free and click-to-place lands where
+  the cursor actually is, with no need to open/close Pause first.
+- Playtest: leave Level Editor back to Hub, confirm mouse look still
+  re-engages correctly (this path was already covered by Part E but is worth
+  re-checking given the new code right next to it).
