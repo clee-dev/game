@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Newtonsoft.Json;
+using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -31,10 +32,28 @@ public class LevelEditorController : MonoBehaviour
 
     public const float CellSize = BuildSystem.CellSize;
 
+    /// <summary>Set in Awake -- LevelEditorBlueprintSync reaches through this to read/replace
+    /// Blueprint on the one LevelEditorController instance that exists per client.</summary>
+    public static LevelEditorController Instance { get; private set; }
+
     [SerializeField] private LevelEditorCamera editorCamera;
+
+    /// <summary>Pause overlay Canvas (PauseMenu) -- hidden during Preview Mode so its
+    /// unconditional Escape handling doesn't fight LevelEditorPreviewController's own
+    /// Escape-to-exit-Preview binding.</summary>
+    [SerializeField] private GameObject pauseCanvas;
+
+    /// <summary>Host-only editing (per Cameron: "only the host can make edits, other
+    /// players just get the camera"). The host/server in this P2P transport IS the
+    /// editing player, so this maps directly onto NGO's IsServer.</summary>
+    public bool IsHost => NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer;
 
     public EditableBlueprint Blueprint { get; private set; } = new();
     public EditorCommandStack Commands { get; } = new();
+
+    /// <summary>Fired whenever Blueprint changes (an undoable edit, or a wholesale
+    /// New/Load) -- LevelEditorBlueprintSync rebroadcasts to non-host clients on this.</summary>
+    public event Action BlueprintChanged;
 
     public EditorMode Mode { get; private set; } = EditorMode.Tiles;
     public int CurrentLayer { get; private set; }
@@ -60,6 +79,9 @@ public class LevelEditorController : MonoBehaviour
 
     private void Awake()
     {
+        Instance = this;
+        Commands.Changed += () => BlueprintChanged?.Invoke();
+
         _visualsRoot = new GameObject("EditorVisuals").transform;
         _visualsRoot.SetParent(transform);
         RefreshAllTileVisuals();
@@ -68,6 +90,9 @@ public class LevelEditorController : MonoBehaviour
 
     private void Update()
     {
+        // Non-host clients are spectators: free camera (LevelEditorCamera is its own
+        // per-client local MonoBehaviour, unaffected by this), no editing input.
+        if (!IsHost) return;
         if (Mode == EditorMode.Preview) return;
 
         HandleLayerKeys();
@@ -288,26 +313,58 @@ public class LevelEditorController : MonoBehaviour
         switch (BrushCategory)
         {
             case WorldObjectCategory.SupplyZone:
-                AddWorldObject(Blueprint.SupplyZones, new SupplyZoneData { id = Blueprint.NextSupplyZoneId(), worldPosition = ToWorldPosition(worldPos) });
+                PlaceOrReplace(Blueprint.SupplyZones, d => d.worldPosition.ToVector3(), worldPos,
+                    () => new SupplyZoneData { id = Blueprint.NextSupplyZoneId(), worldPosition = ToWorldPosition(worldPos) });
                 break;
             case WorldObjectCategory.OrderStation:
-                AddWorldObject(Blueprint.OrderStations, new OrderStationData { id = Blueprint.NextOrderStationId(), worldPosition = ToWorldPosition(worldPos) });
+                PlaceOrReplace(Blueprint.OrderStations, d => d.worldPosition.ToVector3(), worldPos,
+                    () => new OrderStationData { id = Blueprint.NextOrderStationId(), worldPosition = ToWorldPosition(worldPos) });
                 break;
             case WorldObjectCategory.ToolDepot:
-                AddWorldObject(Blueprint.ToolDepots, new ToolDepotData { id = Blueprint.NextToolDepotId(), worldPosition = ToWorldPosition(worldPos), tools = new[] { "hammer" } });
+                PlaceOrReplace(Blueprint.ToolDepots, d => d.worldPosition.ToVector3(), worldPos,
+                    () => new ToolDepotData { id = Blueprint.NextToolDepotId(), worldPosition = ToWorldPosition(worldPos), tools = new[] { "hammer" } });
                 break;
             case WorldObjectCategory.PlayerSpawn:
-                if (Blueprint.PlayerSpawns.Count < 4)
-                    AddWorldObject(Blueprint.PlayerSpawns, ToWorldPosition(worldPos));
+                PlaceOrReplace(Blueprint.PlayerSpawns, d => d.ToVector3(), worldPos,
+                    () => ToWorldPosition(worldPos), maxCount: 4);
                 break;
         }
     }
 
-    private void AddWorldObject<T>(List<T> list, T item)
+    /// <summary>Replaces whatever's already within pickRadius of worldPos (so re-clicking an
+    /// occupied spot swaps it instead of stacking a duplicate on top), or adds a new entry if
+    /// the spot is empty. maxCount enforces PlayerSpawn's 4-player cap on the add path only --
+    /// replacing an existing spawn never changes the count.</summary>
+    private void PlaceOrReplace<T>(List<T> list, Func<T, Vector3> getPos, Vector3 target, Func<T> makeItem, int maxCount = int.MaxValue)
     {
+        const float pickRadius = 1f;
+
+        int existingIndex = -1;
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (Vector3.Distance(getPos(list[i]), target) <= pickRadius)
+            {
+                existingIndex = i;
+                break;
+            }
+        }
+
+        if (existingIndex < 0)
+        {
+            if (list.Count >= maxCount) return;
+
+            T item = makeItem();
+            Commands.Run(new ActionCommand(
+                execute: () => { list.Add(item); RefreshWorldObjectVisuals(); },
+                undo: () => { list.Remove(item); RefreshWorldObjectVisuals(); }));
+            return;
+        }
+
+        T previous = list[existingIndex];
+        T replacement = makeItem();
         Commands.Run(new ActionCommand(
-            execute: () => { list.Add(item); RefreshWorldObjectVisuals(); },
-            undo: () => { list.Remove(item); RefreshWorldObjectVisuals(); }));
+            execute: () => { list[existingIndex] = replacement; RefreshWorldObjectVisuals(); },
+            undo: () => { list[existingIndex] = previous; RefreshWorldObjectVisuals(); }));
     }
 
     private void EraseNearestWorldObject(Vector3 worldPos)
@@ -464,6 +521,7 @@ public class LevelEditorController : MonoBehaviour
         CurrentLayer = 0;
         RefreshAllTileVisuals();
         RefreshWorldObjectVisuals();
+        BlueprintChanged?.Invoke();
     }
 
     public void LoadBlueprint(string id)
@@ -471,6 +529,21 @@ public class LevelEditorController : MonoBehaviour
         BlueprintData data = BlueprintLoader.Load(id);
         if (data == null) return;
 
+        Blueprint = EditableBlueprint.FromBlueprintData(data);
+        Commands.Clear();
+        SelectedTilePos = null;
+        CurrentLayer = Mathf.Clamp(CurrentLayer, 0, Blueprint.GridSize.y - 1);
+        RefreshAllTileVisuals();
+        RefreshWorldObjectVisuals();
+        BlueprintChanged?.Invoke();
+    }
+
+    /// <summary>Applied by LevelEditorBlueprintSync on non-host clients when the host's
+    /// state changes -- same body as LoadBlueprint, minus the disk/cloud read since the
+    /// data arrives over the network instead. Does not re-fire BlueprintChanged --
+    /// nothing on a spectator client needs to react to its own incoming sync.</summary>
+    public void ApplyRemoteBlueprint(BlueprintData data)
+    {
         Blueprint = EditableBlueprint.FromBlueprintData(data);
         Commands.Clear();
         SelectedTilePos = null;
@@ -510,6 +583,7 @@ public class LevelEditorController : MonoBehaviour
 
         Mode = EditorMode.Preview;
         editorCamera.gameObject.SetActive(false);
+        if (pauseCanvas != null) pauseCanvas.SetActive(false);
 
         Vector3 spawnPos = Blueprint.PlayerSpawns.Count > 0
             ? Blueprint.PlayerSpawns[0].ToVector3() + Vector3.up
@@ -529,6 +603,7 @@ public class LevelEditorController : MonoBehaviour
         _activePreview = null;
 
         editorCamera.gameObject.SetActive(true);
+        if (pauseCanvas != null) pauseCanvas.SetActive(true);
         Mode = EditorMode.Tiles;
     }
 }

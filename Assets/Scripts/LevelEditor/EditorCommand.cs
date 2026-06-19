@@ -41,12 +41,17 @@ public class EditorCommandStack
     public bool CanUndo => _undoStack.Count > 0;
     public bool CanRedo => _redoStack.Count > 0;
 
+    /// <summary>Fired after Run/Undo/Redo actually change the blueprint -- the hook
+    /// LevelEditorBlueprintSync uses to know when to re-broadcast to non-host clients.</summary>
+    public event Action Changed;
+
     /// <summary>Executes a new command and pushes it onto the undo stack. Clears redo history.</summary>
     public void Run(IEditorCommand command)
     {
         command.Execute();
         _undoStack.Push(command);
         _redoStack.Clear();
+        Changed?.Invoke();
     }
 
     public void Undo()
@@ -56,6 +61,7 @@ public class EditorCommandStack
         var command = _undoStack.Pop();
         command.Undo();
         _redoStack.Push(command);
+        Changed?.Invoke();
     }
 
     public void Redo()
@@ -65,6 +71,7 @@ public class EditorCommandStack
         var command = _redoStack.Pop();
         command.Execute();
         _undoStack.Push(command);
+        Changed?.Invoke();
     }
 
     public void Clear()

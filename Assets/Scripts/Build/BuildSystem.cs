@@ -49,6 +49,17 @@ public class BuildSystem : MonoBehaviour
     private readonly Dictionary<Vector3Int, TileData> _tileDataByPosition = new();
     private readonly Dictionary<Vector3Int, BuildTile> _liveTilesByPosition = new();
 
+    private int _nextPlayerSpawnIndex;
+
+    /// <summary>Offsets for players beyond the blueprint's defined spawn points -- one of
+    /// these is added (at random) to a cycled-through defined spawn so extras don't stack
+    /// on top of an existing player.</summary>
+    private static readonly Vector3[] OverflowSpawnOffsets =
+    {
+        new(3f, 0f, 0f), new(-3f, 0f, 0f),
+        new(0f, 0f, 3f), new(0f, 0f, -3f),
+    };
+
     private void Awake()
     {
         Instance = this;
@@ -81,6 +92,24 @@ public class BuildSystem : MonoBehaviour
 
     public TileData GetTileDataAt(Vector3Int pos) =>
         _tileDataByPosition.TryGetValue(pos, out var data) ? data : null;
+
+    /// <summary>Server-only. Hands out the blueprint's playerSpawns in order, one per call
+    /// (NetworkPlayer calls this once per player as they arrive in Game1). Once every
+    /// defined spawn point has been handed out once, further calls cycle back through them
+    /// with a random 3-unit cardinal offset so extra players don't stack on an existing one.
+    /// _nextPlayerSpawnIndex resets naturally every time Game1 is (re-)loaded, since this
+    /// MonoBehaviour and its Awake() run fresh on every scene load.</summary>
+    public Vector3 GetPlayerSpawnPosition()
+    {
+        WorldPosition[] spawns = CurrentBlueprint?.playerSpawns;
+        if (spawns == null || spawns.Length == 0) return Vector3.zero;
+
+        int idx = _nextPlayerSpawnIndex++;
+        Vector3 basePos = spawns[idx % spawns.Length].ToVector3();
+        if (idx < spawns.Length) return basePos;
+
+        return basePos + OverflowSpawnOffsets[Random.Range(0, OverflowSpawnOffsets.Length)];
+    }
 
     // -------------------------------------------------------------------------
     // Spawning (server only)

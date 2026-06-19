@@ -272,6 +272,8 @@ MonoBehaviour:
   playerCamera: {fileID: 4271986051621054946}
   playerCam: {fileID: 5451394608381476393}
   audioListener: {fileID: 6282553568160900946}
+  playerInteraction: {fileID: 3911690637486458895}
+  characterController: {fileID: 6547845995429739131}
 --- !u!114 &5074844630771936822
 MonoBehaviour:
   m_ObjectHideFlags: 0

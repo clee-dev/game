@@ -6,6 +6,8 @@ public static class SteamCloudSave
 {
     public static bool Write(string fileName, string content)
     {
+        if (!SteamManager.Initialized) return false;
+
         try
         {
             SteamRemoteStorage.FileWrite(fileName, System.Text.Encoding.UTF8.GetBytes(content));
@@ -20,6 +22,8 @@ public static class SteamCloudSave
 
     public static string Read(string fileName)
     {
+        if (!SteamManager.Initialized) return null;
+
         try
         {
             if (!SteamRemoteStorage.FileExists(fileName))
@@ -43,6 +47,8 @@ public static class SteamCloudSave
     public static List<string> ListFiles(string prefix, string suffix)
     {
         var results = new List<string>();
+
+        if (!SteamManager.Initialized) return results;
 
         try
         {

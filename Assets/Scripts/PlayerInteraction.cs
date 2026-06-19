@@ -54,16 +54,17 @@ public class PlayerInteraction : NetworkBehaviour
         PhysicsPickup    pickupTarget = hitCollider != null ? hitCollider.GetComponentInParent<PhysicsPickup>()    : null;
         OrderStation     orderTarget  = hitCollider != null ? hitCollider.GetComponentInParent<OrderStation>()     : null;
         LevelSelectKiosk kioskTarget  = hitCollider != null ? hitCollider.GetComponentInParent<LevelSelectKiosk>() : null;
-        _isTargetingInteractable = tileTarget != null || pickupTarget != null || orderTarget != null || kioskTarget != null;
+        LevelEditorAccessPoint editorAccessTarget = hitCollider != null ? hitCollider.GetComponentInParent<LevelEditorAccessPoint>() : null;
+        _isTargetingInteractable = tileTarget != null || pickupTarget != null || orderTarget != null || kioskTarget != null || editorAccessTarget != null;
 
         if (_openOrderMenuTarget != null && _openOrderMenuTarget != orderTarget)
             CloseOrderMenu();
         if (_openKioskMenuTarget != null && _openKioskMenuTarget != kioskTarget)
             CloseKioskMenu();
 
-        UpdatePrompt(tileTarget, orderTarget, kioskTarget);
+        UpdatePrompt(tileTarget, orderTarget, kioskTarget, editorAccessTarget);
         HandleContinuousBuild(tileTarget);
-        HandleInteractPress(tileTarget, pickupTarget, orderTarget, kioskTarget);
+        HandleInteractPress(tileTarget, pickupTarget, orderTarget, kioskTarget, editorAccessTarget);
         HandleOrderMenuSelection();
         HandleKioskMenuSelection();
     }
@@ -99,10 +100,16 @@ public class PlayerInteraction : NetworkBehaviour
     // Single press: pick up / place / drop
     // -------------------------------------------------------------------------
 
-    private void HandleInteractPress(BuildTile tileTarget, PhysicsPickup pickupTarget, OrderStation orderTarget, LevelSelectKiosk kioskTarget)
+    private void HandleInteractPress(BuildTile tileTarget, PhysicsPickup pickupTarget, OrderStation orderTarget, LevelSelectKiosk kioskTarget, LevelEditorAccessPoint editorAccessTarget)
     {
         if (!_input.InteractPressed) return;
         _input.ConsumeInteract();
+
+        if (editorAccessTarget != null)
+        {
+            editorAccessTarget.EnterLevelEditorRpc();
+            return;
+        }
 
         if (kioskTarget != null)
         {
@@ -276,9 +283,15 @@ public class PlayerInteraction : NetworkBehaviour
     // Prompt
     // -------------------------------------------------------------------------
 
-    private void UpdatePrompt(BuildTile target, OrderStation orderTarget, LevelSelectKiosk kioskTarget)
+    private void UpdatePrompt(BuildTile target, OrderStation orderTarget, LevelSelectKiosk kioskTarget, LevelEditorAccessPoint editorAccessTarget)
     {
         if (interactPrompt == null) return;
+
+        if (editorAccessTarget != null)
+        {
+            interactPrompt.text = "[E] Enter Level Editor";
+            return;
+        }
 
         if (kioskTarget != null)
         {

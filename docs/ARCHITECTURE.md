@@ -22,15 +22,20 @@ Boot.unity → MainMenu.unity → Hub.unity → Game1.unity
   enables movement/camera/visuals only for the local owner. Players select a
   blueprint at a `LevelSelectKiosk`, then stand on the `StartingArea` trigger
   (`StartingAreaTrigger`, an in-scene-placed `NetworkObject`) which starts a
-  countdown that loads `Game1`.
+  countdown that loads `Game1`. A `LevelEditorAccessPoint` terminal sends the
+  whole connected party into `LevelEditor.unity` instead (see Level Editor
+  section below).
 - **Game1** — `BuildSystem` loads the selected blueprint (`GameSession.SelectedBlueprintId`,
   falling back to its own Inspector default) and spawns tiles, supply zones, tool
   depots, and order stations server-side.
 
 `LevelEditor.unity` exists and is fully wired (`LevelEditorController`,
 `LevelEditorUI`, `EditorGridRenderer`, `LevelEditorCamera` all configured). It is
-not yet in `EditorBuildSettings` — intentional per `GAME_INTENT.md` Phase F
-("dev tool first, player unlock second"), not a gap.
+now in `EditorBuildSettings` and reachable in-game from `Hub.unity` via a
+`LevelEditorAccessPoint` terminal (see below) — **this is a change from the
+previously-documented "dev tool first, player unlock second" gating in
+`GAME_INTENT.md` Phase F; flagged for Cameron's review, not unilaterally
+resolved.** See `docs/SESSION.md` 2026-06-19 (Part B) for details.
 
 ---
 
@@ -80,6 +85,13 @@ one before the economy system is built.
 Stores currency, cosmetics, stats, save slots. `SteamCloudSave` handles Steam Cloud
 file read/write for both save data and blueprints.
 
+**Fixed (2026-06-19, Part B):** `SteamCloudSave.Write/Read/ListFiles` all called
+into `SteamRemoteStorage` unconditionally. Running without Steam initialized
+(`SteamManager.Initialized == false`) threw a `NullReferenceException` out of
+`ListFiles`, breaking `BlueprintLoader`'s startup scan. All three methods now
+short-circuit and return their empty/failure value (`false` / `null` / empty
+list) when Steam isn't initialized.
+
 ---
 
 ### Player
@@ -93,7 +105,27 @@ file read/write for both save data and blueprints.
 `IsSprinting`, `JumpPressed`, `InteractPressed`, `InteractHeld`, `ConsumeInteract`.
 
 `NetworkPlayer` — `OnNetworkSpawn()` explicitly enables/disables all components
-based on `IsOwner`. Does not assume prefab default state.
+based on `IsOwner`. Does not assume prefab default state. **Updated (Part B):**
+also re-evaluates on every `SceneManager.activeSceneChanged`, and now gates on
+`IsOwner && !IsPassiveScene()` — `passiveScenes` (default: `["LevelEditor"]`)
+force-disables every player's gameplay components (including the owner's) while
+that scene is active, since `LevelEditor.unity` carries every connected player's
+`NetworkObject` along (same NGO scene-transition mechanism as Hub → Game1; there's
+no "personal/solo scene" concept) but has its own orthographic
+`LevelEditorCamera`/controls and no use for player avatars. Also gained
+`playerInteraction` to the local-only component list, and a
+`[Rpc(SendTo.Server)] RequestLoadSceneRpc(FixedString64Bytes sceneName)` that
+clients use to request a scene load (NGO's `NetworkSceneManager.LoadScene` is
+server-only) — used by both `PauseMenu.LeaveToHub()` and
+`LevelEditorAccessPoint.EnterLevelEditorRpc()`.
+
+**Updated (Part C):** gained a `characterController` field and a Game1 spawn
+hook. When `OnActiveSceneChanged` fires with `current.name == "Game1"`, the
+server calls `BuildSystem.Instance.GetPlayerSpawnPosition()` and sends the
+result to the owning client via `[Rpc(SendTo.Owner)] TeleportToRpc(Vector3)`
+(same target pattern as `HubPlayerState.TeleportToRpc`), which disables the
+`CharacterController` for the one frame it sets `transform.position` so the
+controller doesn't fight the teleport next physics step.
 
 `HubPlayerState` — Hub-specific spawn handling. Positions player at a
 `HubSpawnPoints` location.
@@ -168,6 +200,15 @@ that billboards toward local camera while visible.
 `BuildSystem` — orchestrator. Loads blueprint via `BlueprintLoader`. Builds
 position/state lookups. Spawns tile/zone/depot/station prefabs server-side only.
 
+**Player spawn placement (Part C):** `GetPlayerSpawnPosition()` (server-only)
+hands out `CurrentBlueprint.playerSpawns` in order via `_nextPlayerSpawnIndex`,
+which resets naturally every Game1 load (lives on `BuildSystem`, whose
+`Awake()` runs fresh each scene load). Once every defined spawn has been
+handed out once, further calls cycle back through them with a random offset
+from `OverflowSpawnOffsets` (±3 units, X or Z) so extra players don't stack on
+an existing one. Called from `NetworkPlayer.OnActiveSceneChanged` — see Player
+section above.
+
 **Dependency rules (implemented):**
 - Foundation: no dependencies
 - Floor: needs tile below Built
@@ -178,6 +219,18 @@ position/state lookups. Spawns tile/zone/depot/station prefabs server-side only.
 **Not implemented:** structural integrity / collapse cascade. The
 `supportDependents` graph and Jenga-style collapse on destruction are planned but
 do not exist in code.
+
+**Per-material hue visuals (Part B):** `BuildTile.BaseHueFor(MaterialType)` is a
+stand-in for real per-material textures, which **do not exist yet** as assets.
+Ghost shows the raw hue at the eligible/ineligible alpha; Placed/Built lerp the
+hue toward blue/green (`placedBlueBlend`/`builtGreenBlend`, both 0.5 default) so
+build progress reads at a glance. Chosen hues: Wood tan `(0.76, 0.60, 0.42)`,
+Concrete gray `(0.65, 0.65, 0.65)`, Steel cool-gray `(0.55, 0.58, 0.62)`. The
+ghost material was also swapped from an opaque material (`BuildTile.prefab` was
+pointing `ghostRenderer` at a non-transparent material, which is presumably why
+ghosts previously didn't read as ghostly) to a new `ToonTransparentGhost.mat`
+(uses `ToonTransparent.shader`, `_BaseColor` alpha 0.3) so the per-material tint
+is actually visible through transparency instead of solid-colored.
 
 ---
 
@@ -220,6 +273,12 @@ with public fields only (required for Newtonsoft + IL2CPP).
 Cloud files, deduped via `HashSet<string>` of ids. Only `blueprint_001.json` exists
 on disk today.
 
+**Fixed (Part B):** `blueprint_001.json`'s `order_station_0` world position
+overlapped a default tool-depot/supply-zone spawn location, causing two
+prefabs to spawn intersecting each other in `Game1`. Moved from
+`(4.5, 0.5, -1)` to `(1, 0.5, 4)`. **Unverified in-editor** — re-check spawn
+layout visually once an Editor is available.
+
 ---
 
 ### Hub Blueprint-Select-and-Start Flow
@@ -229,10 +288,34 @@ spawn, shows numbered pop-up, broadcasts selection via
 `[Rpc(SendTo.Server)]`. Sends the blueprint **id string** (not a list index) to
 avoid ordering mismatches across clients (each scans Steam Cloud independently).
 
+**Fixed (Part B):** the script existed and was fully implemented, but no
+`LevelSelectKiosk` instance had ever actually been placed in `Hub.unity` — a
+real gap, not just docs drift (unlike the other "already done" findings in the
+2026-06-19 audit session above). Added one in-scene at `(-14, 0.5, -22)`,
+targetable via `PlayerInteraction`'s raycast like `OrderStation`/`BuildTile`.
+**Placement is unverified in-editor** (no Unity Editor available this session)
+— Cameron should confirm it doesn't intersect Hub geometry.
+
 `GameSession.SelectedBlueprintId` is set here, read by `BuildSystem` in Game1.
 
-`StartingAreaTrigger` — in-scene-placed `NetworkObject`. Sole level-start path.
-Countdown triggers scene load to Game1.
+`StartingAreaTrigger` — in-scene-placed `NetworkObject`. Sole level-start path
+into `Game1`. Countdown triggers scene load.
+
+`LevelEditorAccessPoint` (Part B, new) — Hub-only `NetworkObject`, same
+raycast-target pattern as `LevelSelectKiosk`. Press E,
+`EnterLevelEditorRpc()` sends the whole connected party into `LevelEditor.unity`
+(same all-players-travel-together NGO scene-transition mechanism
+`StartingAreaTrigger` uses for Game1 — see `NetworkPlayer.passiveScenes` above
+for how player avatars are neutralized once there). Placed at `(2, 0.5, -22)`,
+**unverified in-editor**, same caveat as above.
+
+**Design-intent flag:** making the Level Editor reachable from the Hub by any
+player, and adding `LevelEditor.unity` to `EditorBuildSettings` to support the
+scene transition, changes the previously-documented "dev tool first, player
+unlock second" gating from `GAME_INTENT.md` Phase F. This was requested
+explicitly as part of this session's task list, but the *intent* change wasn't
+separately confirmed with Cameron — flagged here and in `docs/SESSION.md` for
+review rather than silently treated as settled.
 
 ---
 
@@ -258,6 +341,97 @@ anything saved is immediately selectable from the Hub kiosk.
 immediately selectable from the Hub `LevelSelectKiosk` with zero extra work
 (`BlueprintLoader.GetAllBlueprintIds()` already unifies both sources).
 
+**Fixed (Part B):** placing a SupplyZone/OrderStation/ToolDepot/PlayerSpawn
+World Object on a cell that already had one of the same category stacked a
+second entry on top instead of replacing it (`AddWorldObject` always appended).
+`LevelEditorController.PlaceOrReplace<T>` now checks for an existing entry
+within `pickRadius` (1 unit) of the click and replaces it in place (undoable,
+same as add) instead of stacking; falls through to add-new if the spot is
+empty. `PlayerSpawn`'s 4-player cap still applies on the add path only —
+replacing an existing spawn never changes the count.
+
+**Pause overlay + Preview Mode conflict (Part B, found and fixed):** see "Pause
+Menu" below — `LevelEditorController` now has a `pauseCanvas` field toggled off
+during Preview Mode to avoid a double-Escape-handler conflict with
+`LevelEditorPreviewController`.
+
+**Multiplayer access model + host-only editing (Part C, new):** any connected
+player can be in `LevelEditor.unity` together, but only the host edits.
+`LevelEditorController` gained a static `Instance` (matching
+`BuildSystem.Instance`/`HubSpawnPoints.Instance`) and `bool IsHost =>
+NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer`.
+`Update()` and `LevelEditorUI.OnGUI()` both return immediately for non-hosts
+before processing any editing input — non-hosts see a "Spectating" label
+instead of the tool panels but keep camera pan/zoom.
+
+Non-host clients see the host's edits live via new
+`LevelEditorBlueprintSync : NetworkBehaviour`, on its own scene-placed
+`NetworkObject` (same pattern as `LevelEditorAccessPoint`/`LevelSelectKiosk` —
+no `DefaultNetworkPrefabs` registration needed). `EditorCommandStack` gained a
+`Changed` event (fires on `Run`/`Undo`/`Redo`, not `Clear`), which
+`LevelEditorController` forwards as `BlueprintChanged` (also fired from
+`NewBlueprint()`/`LoadBlueprint()`). The host broadcasts its current
+blueprint as JSON via `[Rpc(SendTo.NotServer)]` on every `BlueprintChanged`;
+clients rebuild their local view via new
+`LevelEditorController.ApplyRemoteBlueprint(BlueprintData)`, which replaces
+`Blueprint`, clears the (host-only) command stack, and refreshes visuals.
+Late joiners are covered by the same path: a non-host's `OnNetworkSpawn`
+requests the current blueprint via
+`[Rpc(SendTo.Server, InvokePermission = Everyone)]`, which the host answers
+through the same broadcast method.
+
+**Flagged, unverified:** `[Rpc(SendTo.NotServer)]` is this codebase's first
+use of that RPC target (everything else is `SendTo.Server`/`SendTo.Owner`).
+No Unity Editor/NGO package was available to compile-check it this session —
+confirm it builds.
+
+---
+
+### Pause Menu
+
+`PauseMenu` (Part B, new) — plain `MonoBehaviour`, one instance per gameplay
+scene (`Game1.unity`, `LevelEditor.unity`). `Update()` unconditionally toggles
+on `Keyboard.current.escapeKey.wasPressedThisFrame`. `Pause()` shows
+`pausePanel`, unlocks the cursor, fires `GameEvents.FireGamePaused()`.
+`Resume()` reverses it via `GameEvents.FireGameResumed()`. `LeaveToHub()` routes
+through the local player's `NetworkPlayer.RequestLoadSceneRpc("Hub")` if a
+`NetworkManager` session exists, else falls back to a plain
+`SceneManager.LoadScene("MainMenu")`.
+
+`PlayerCamera` already subscribed to `GameEvents.OnGamePaused/OnGameResumed`
+before this session (see Player section above), so `Game1.unity`'s wiring
+needed no script changes — only the Canvas/Button scene hierarchy (Canvas +
+CanvasScaler + GraphicRaycaster root, `PausePanel` background, `ResumeButton` +
+`LeaveToHubButton` each with a child TMP label), modeled directly on the
+pre-existing `LobbyUI` Canvas hierarchy in `Hub.unity`. `Game1.unity` already
+had an `EventSystem` + `InputSystemUIInputModule`; `LevelEditor.unity` did not
+and got one added (field-for-field copy of Game1's).
+
+**Found and fixed (Part B):** `LevelEditor.unity`'s own
+`LevelEditorPreviewController` independently listens for Escape to call
+`LevelEditorController.ExitPreviewMode()` while in Preview Mode. Wiring an
+always-active `PauseMenu` into the same scene meant pressing Escape during
+Preview Mode would trigger both handlers simultaneously, each fighting over
+`Cursor.lockState`/`Cursor.visible`. Fixed by giving `LevelEditorController` a
+`pauseCanvas` field (the `PauseCanvas` GameObject), set inactive in
+`EnterPreviewMode()` and reactivated in `ExitPreviewMode()` — mirrors the
+existing `editorCamera.gameObject.SetActive(...)` pattern in the same two
+methods. No analogous conflict exists in `Game1.unity` (no sub-mode there owns
+Escape independently).
+
+**Design-intent flag:** `LevelEditorUI`'s doc comment states the editor's own
+panels are deliberately `OnGUI`-only ("needs no Canvas/Button hierarchy to be
+usable"). The new Pause overlay is Canvas-based, layered on top of that
+OnGUI-only editor UI. Treated as a separate, narrower-scoped concern rather
+than a contradiction — both UI paradigms coexist fine in the same scene — but
+this is a judgment call, not something Cameron explicitly signed off on.
+
+**Unverified:** exact visual layout (button positions/sizes, panel appearance)
+in both scenes — no Unity Editor was available this session to render and
+visually confirm either Pause UI. Structural wiring (every fileID
+cross-reference) was verified by direct reads of the scene YAML, but Cameron
+should open both scenes once and eyeball it.
+
 ---
 
 ### Voice
@@ -279,7 +453,8 @@ no Async suffix).
 
 `MainMenuUI`, `HubUI`, `LobbyUI` (PreLobby / InLobby / Pause panels),
 `OrderMenuPanel` (always-active parent GameObject, inner panel toggled — a
-disabled GameObject's `Update()` never runs).
+disabled GameObject's `Update()` never runs), `PauseMenu` (Game1/LevelEditor
+in-gameplay pause overlay, see "Pause Menu" below).
 
 `GameEvents` static event bus: `OnGameStarted`, `OnGamePaused`, `OnGameResumed`.
 
@@ -317,7 +492,10 @@ Kept in repo but not part of the live flow:
 - `MiniGameLauncher` — references a scene that no longer exists. `StartingAreaTrigger`
   is the sole level-start path.
 - `ReadyManager` — its only caller was `LobbyUI`'s "Start Game" button, which is
-  currently disabled in `Hub.unity`. No reachable pause/mute UI presently.
+  currently disabled in `Hub.unity`. `LobbyUI`'s own `PausePanel` (Hub/lobby-side)
+  is still unreachable for the same reason — unrelated to the new `PauseMenu`
+  Canvas added to `Game1`/`LevelEditor` this session (see "Pause Menu" above),
+  which is reachable.
 - `ConnectionManager` — old localhost test script from early NGO setup. Superseded
   by `SteamLobbyManager`.
 
