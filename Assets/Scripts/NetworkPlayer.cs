@@ -52,6 +52,15 @@ public class NetworkPlayer : NetworkBehaviour
 
         if (IsServer && current.name == "Game1")
             TeleportToRpc(BuildSystem.Instance != null ? BuildSystem.Instance.GetPlayerSpawnPosition() : Vector3.zero);
+
+        // HubPlayerState only fires GameEvents.OnGameStarted (which re-locks the cursor and
+        // re-enables PlayerCamera's mouse look) on a player's first-ever spawn into Hub --
+        // its _isSpawnedIn NetworkVariable is already true and doesn't change on a return
+        // trip from Game1/LevelEditor, so nothing re-fires it. Re-fire here every time the
+        // owner's active scene becomes Hub, covering "Leave to Hub" from the Pause Menu and
+        // Level Summary screen, both of which unlock the cursor and never re-lock it.
+        if (IsOwner && current.name == "Hub")
+            GameEvents.FireGameStarted();
     }
 
     [Rpc(SendTo.Owner)]

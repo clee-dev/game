@@ -121,7 +121,9 @@ public class BuildSystem : MonoBehaviour
         {
             Vector3 worldPos = (Vector3)tile.position.ToVector3Int() * CellSize;
             var instance = Instantiate(tilePrefab, worldPos, Quaternion.identity);
-            instance.GetComponent<NetworkObject>().Spawn();
+            var netObj = instance.GetComponent<NetworkObject>();
+            netObj.Spawn();
+            netObj.DestroyWithScene = true;
         }
 
         foreach (SupplyZoneData zone in CurrentBlueprint.supplyZones)
@@ -136,7 +138,9 @@ public class BuildSystem : MonoBehaviour
         foreach (OrderStationData station in CurrentBlueprint.orderStations)
         {
             var instance = Instantiate(orderStationPrefab, station.worldPosition.ToVector3(), Quaternion.identity);
-            instance.GetComponent<NetworkObject>().Spawn();
+            var netObj = instance.GetComponent<NetworkObject>();
+            netObj.Spawn();
+            netObj.DestroyWithScene = true;
         }
     }
 

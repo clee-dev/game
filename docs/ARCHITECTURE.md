@@ -127,6 +127,23 @@ result to the owning client via `[Rpc(SendTo.Owner)] TeleportToRpc(Vector3)`
 `CharacterController` for the one frame it sets `transform.position` so the
 controller doesn't fight the teleport next physics step.
 
+**Fixed (Part E): mouse look/cursor lock dead after returning to Hub.**
+`PlayerCamera` only re-locks the cursor and re-enables mouse look in reaction
+to `GameEvents.OnGameStarted`. That event was only ever fired once, from
+`HubPlayerState.ApplySpawnState` on a player's first spawn into Hub (gated on
+its `_isSpawnedIn` `NetworkVariable` actually changing value). The player's
+`NetworkObject` is never destroyed/recreated across scene transitions, so on a
+return trip from `Game1`/`LevelEditor` (`PauseMenu.LeaveToHub` or
+`LevelSummaryUI.ReturnToHub`, both of which unlock the cursor for their own
+button clicks and never re-lock it), `_isSpawnedIn` was already `true` and
+didn't change -- nothing re-fired `OnGameStarted`, so the cursor stayed
+unlocked and mouse look stayed off indefinitely. Fixed by having
+`NetworkPlayer.OnActiveSceneChanged` re-fire `GameEvents.FireGameStarted()`
+itself whenever `IsOwner && current.name == "Hub"`, independent of
+`HubPlayerState`'s networked spawn-state tracking. **Unverified in-Editor** --
+please confirm leaving to Hub from both `Game1` (Pause Menu and Level Summary)
+and `LevelEditor` restores mouse look immediately.
+
 `HubPlayerState` — Hub-specific spawn handling. Positions player at a
 `HubSpawnPoints` location.
 
@@ -196,6 +213,28 @@ at the same Hammer prefab.
 `BuildTile` — `NetworkVariable<TileState>` (`Empty / MaterialPlaced / Built /
 Destroyed`). Ghost, placed, and built visuals. World-space progress bar canvas
 that billboards toward local camera while visible.
+
+**Fixed (2026-06-19, Part E): the whole level followed players back to the
+Hub.** Every dynamically-spawned `NetworkObject` in the level (`BuildTile`,
+`OrderStation`, and the materials/tools spawned at runtime by
+`SupplyZoneSpawner`/`ToolDepotSpawner`/`OrderQueueSystem`) never set
+`NetworkObject.DestroyWithScene`. NGO's default for a dynamically-spawned (not
+scene-placed) `NetworkObject` is `DestroyWithScene = false`, which means on a
+`LoadSceneMode.Single` transition NGO **migrates it into the next active scene
+instead of destroying it** -- this is intentional default behavior (it's how a
+held item or a player object is meant to survive a scene change), but it meant
+every tile/depot/station/material/tool the server ever spawned in `Game1`
+silently rode along into `Hub` instead of being destroyed with the scene.
+Fixed by setting `netObj.DestroyWithScene = true` immediately after every
+`Spawn()` call in `BuildSystem.SpawnFromBlueprint()`, `SupplyZoneSpawner.SpawnOne()`,
+`ToolDepotSpawner.SpawnSlot()`, and `OrderQueueSystem.Deliver()`. Scene-placed
+`NetworkObject`s (`LevelTimer`, `LevelEditorBlueprintSync`, `LevelSelectKiosk`,
+`LevelEditorAccessPoint`, `StartingAreaTrigger`, `OrderQueueSystem` itself) were
+never affected -- `IsSceneObject == true` objects are always destroyed with
+their scene regardless of this flag, only runtime-`Instantiate`d ones default
+to surviving. **Unverified in-Editor** -- no Unity Editor or C# compiler was
+available this session; please load into `Game1`, leave to Hub, and confirm
+the Hub is empty of leftover tiles/depots/stations/materials/tools.
 
 `BuildSystem` — orchestrator. Loads blueprint via `BlueprintLoader`. Builds
 position/state lookups. Spawns tile/zone/depot/station prefabs server-side only.
@@ -368,6 +407,19 @@ real gap, not just docs drift (unlike the other "already done" findings in the
 targetable via `PlayerInteraction`'s raycast like `OrderStation`/`BuildTile`.
 **Placement is unverified in-editor** (no Unity Editor available this session)
 — Cameron should confirm it doesn't intersect Hub geometry.
+
+**Added (Part E):** `LevelSelectKiosk`'s menu now has a trailing "Enter Level
+Editor" option after the scanned blueprint list (`OptionCount` is
+`_availableBlueprintIds.Length + 1`; `IsLevelEditorOption(index)` is true for
+the last row). Selecting it calls a new `LevelSelectKiosk.EnterLevelEditorRpc()`
+— the same one-line `NetworkManager.Singleton.SceneManager.LoadScene("LevelEditor",
+LoadSceneMode.Single)` `LevelEditorAccessPoint.EnterLevelEditorRpc()` already
+does, duplicated rather than shared so each Hub terminal stays self-contained.
+`PlayerInteraction.SelectKioskOption()` branches on `IsLevelEditorOption(index)`
+to call this instead of `SelectBlueprintRpc`. This is a second, more
+discoverable path into `LevelEditor.unity` alongside the standalone
+`LevelEditorAccessPoint` terminal — both remain in `Hub.unity`, this doesn't
+replace either one.
 
 `GameSession.SelectedBlueprintId` is set here, read by `BuildSystem` in Game1.
 
