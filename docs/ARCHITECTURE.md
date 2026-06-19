@@ -27,8 +27,13 @@ Boot.unity → MainMenu.unity → Hub.unity → Game1.unity
   falling back to its own Inspector default) and spawns tiles, supply zones, tool
   depots, and order stations server-side.
 
-`LevelEditor.unity` does not yet exist as a scene — the Level Editor scripts are
-written but scene/GameObject wiring is a manual step (see `docs/wiring/`).
+`LevelEditor.unity` exists and is wired (camera, controller, grid renderer, UI). Reached
+by opening it directly in the Editor — no in-game scene-load path to it yet.
+
+The Hub kiosk that lets players pick a Level-Editor-saved blueprint
+(`LevelSelectKiosk`) is fully scripted but not yet placed in `Hub.unity`, and
+`GameSession` is not yet added to `Boot.unity`'s `Managers` object — see
+`docs/wiring/hub-level-select-kiosk.md`.
 
 ---
 
@@ -233,10 +238,8 @@ player builds, needed for Play Mode preview).
 - `LevelEditorUI` — all panels via `OnGUI`
 
 Saves write to `StreamingAssets/Blueprints/` and Steam Cloud simultaneously, so
-anything saved is immediately selectable from the Hub kiosk.
-
-**The `LevelEditor.unity` scene does not yet exist.** Scripts are written; scene and
-GameObject wiring is a manual step. See `docs/wiring/`.
+anything saved is immediately selectable from the Hub kiosk once the kiosk itself is
+wired into the scene (see `docs/wiring/hub-level-select-kiosk.md`).
 
 ---
 
