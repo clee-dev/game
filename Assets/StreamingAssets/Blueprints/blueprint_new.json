@@ -1,0 +1,171 @@
+{
+  "id": "blueprint_new",
+  "name": "New Blueprint",
+  "description": "",
+  "scenery": "forest",
+  "gridSize": {
+    "x": 10,
+    "y": 3,
+    "z": 10
+  },
+  "tiles": [
+    {
+      "id": "tile_001",
+      "position": {
+        "x": 4,
+        "y": 0,
+        "z": 8
+      },
+      "type": "window",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_002",
+      "position": {
+        "x": 4,
+        "y": 0,
+        "z": 7
+      },
+      "type": "window",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_003",
+      "position": {
+        "x": 6,
+        "y": 0,
+        "z": 7
+      },
+      "type": "window",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_004",
+      "position": {
+        "x": 5,
+        "y": 0,
+        "z": 6
+      },
+      "type": "window",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_005",
+      "position": {
+        "x": 8,
+        "y": 0,
+        "z": 2
+      },
+      "type": "foundation",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_006",
+      "position": {
+        "x": 8,
+        "y": 0,
+        "z": 3
+      },
+      "type": "foundation",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_007",
+      "position": {
+        "x": 7,
+        "y": 0,
+        "z": 4
+      },
+      "type": "foundation",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_008",
+      "position": {
+        "x": 6,
+        "y": 0,
+        "z": 4
+      },
+      "type": "foundation",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_009",
+      "position": {
+        "x": 6,
+        "y": 0,
+        "z": 3
+      },
+      "type": "foundation",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_010",
+      "position": {
+        "x": 7,
+        "y": 0,
+        "z": 3
+      },
+      "type": "foundation",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    },
+    {
+      "id": "tile_011",
+      "position": {
+        "x": 7,
+        "y": 0,
+        "z": 2
+      },
+      "type": "foundation",
+      "requiredMaterial": "wood",
+      "requiredTool": "hammer",
+      "health": 100
+    }
+  ],
+  "supplyZones": [],
+  "orderStations": [],
+  "toolDepots": [],
+  "playerSpawns": [
+    {
+      "x": 8.1046505,
+      "y": 0.0,
+      "z": 6.327908
+    },
+    {
+      "x": 10.5299683,
+      "y": 0.0,
+      "z": 1.96899843
+    }
+  ],
+  "contractDefaults": {
+    "timeLimitSeconds": 300,
+    "allowedMaterials": [
+      "wood"
+    ],
+    "completionThresholds": {
+      "full": 1.0,
+      "partial": 0.75
+    },
+    "basePayout": 500
+  }
+}
