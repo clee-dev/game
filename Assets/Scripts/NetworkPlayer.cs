@@ -32,6 +32,9 @@ public class NetworkPlayer : NetworkBehaviour
     [Tooltip("Scenes where the gameplay components above stay disabled even for the owner (e.g. LevelEditor, which has its own camera/controls).")]
     [SerializeField] private string[] passiveScenes = { "LevelEditor" };
 
+    [Header("Game1 spawn placement")]
+    [SerializeField] private CharacterController characterController;
+
     public override void OnNetworkSpawn()
     {
         SceneManager.activeSceneChanged += OnActiveSceneChanged;
@@ -43,7 +46,27 @@ public class NetworkPlayer : NetworkBehaviour
         SceneManager.activeSceneChanged -= OnActiveSceneChanged;
     }
 
-    private void OnActiveSceneChanged(Scene previous, Scene current) => ApplyComponentState();
+    private void OnActiveSceneChanged(Scene previous, Scene current)
+    {
+        ApplyComponentState();
+
+        if (IsServer && current.name == "Game1")
+            TeleportToRpc(BuildSystem.Instance != null ? BuildSystem.Instance.GetPlayerSpawnPosition() : Vector3.zero);
+    }
+
+    [Rpc(SendTo.Owner)]
+    private void TeleportToRpc(Vector3 position)
+    {
+        if (characterController == null)
+        {
+            transform.position = position;
+            return;
+        }
+
+        characterController.enabled = false;
+        transform.position          = position;
+        characterController.enabled = true;
+    }
 
     private void ApplyComponentState()
     {

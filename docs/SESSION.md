@@ -203,3 +203,119 @@ checked by Cameron.**
 - Pause UI visual layout (button positions/sizing) in both `Game1.unity` and
   `LevelEditor.unity` — not visually confirmed.
 - `BuildTile` per-material hue values are a placeholder, not an art decision.
+
+---
+
+## 2026-06-19 (Part C)
+
+**Context:** answers to four audit questions Cameron raised about the Level
+Editor multiplayer gaps. Worked autonomously per standing instructions
+(resolve ambiguity via engineering judgment, document assumptions here). No
+Unity Editor available this session either — all changes hand-verified via
+`grep`/fileID cross-reference, **not compiled or opened in-Editor**.
+
+### Q4 — missing Wood/Concrete/Steel texture/material: already resolved
+
+Cameron had pushed `Wood.mat` (and the Trowel/Torch prefabs) in a separate
+commit and thought he'd forgotten to push it. Re-verified `Hub.unity`'s
+prior merge (`4b4b086`, from the Part B session) is structurally sound —
+`LevelSelectKiosk` and `LevelEditorAccessPoint` both present, zero duplicate
+fileIDs, zero conflict markers — and confirmed `Wood.mat` is already wired
+onto `WoodPlank.prefab` in that merged commit. Nothing more to do here.
+
+**Deliberately not touched:** wiring `Wood.mat` onto `BuildTile.prefab`
+itself. `BuildTile`'s Ghost/Placed/Built renderers currently use
+`ToonTransparentGhost.mat`/`Blue.mat`/`Green.mat` with a code-level
+hue-tint system (`BuildTile.BaseHueFor`, added in Part B above) standing in
+for real materials. Swapping in an actual wood texture there raises a real
+design question — how should a textured material coexist with the
+existing build-state blue/green tint? — that's Gilbert's call per the
+existing placeholder note in Part B, not mine to decide unilaterally per
+CLAUDE.md's rule against assuming design intent.
+
+### Q1 — multiplayer Level Editor access model
+
+Cameron's answer: any connected player can be in the `LevelEditor` scene
+together, but **only the host can edit**; non-host clients get camera/pan
+only, no UI, and see the host's edits live.
+
+- **Host-only input gating.** `LevelEditorController` gained a static
+  `Instance` (matching the `BuildSystem.Instance`/`HubSpawnPoints.Instance`
+  pattern already used elsewhere) and a `bool IsHost =>
+  NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer`.
+  `Update()` now returns immediately for non-hosts, before any editing
+  input is processed. `LevelEditorUI.OnGUI()` does the same for the tool
+  panels, replacing them with a one-line "Spectating" label for non-hosts.
+  Chose to gate inside the existing plain `LevelEditorController` rather
+  than converting the whole 573-line controller into a `NetworkBehaviour`
+  — much smaller blast radius.
+- **Live blueprint sync.** New `LevelEditorBlueprintSync : NetworkBehaviour`
+  on its own scene-placed `NetworkObject` in `LevelEditor.unity` (same
+  pattern as `LevelEditorAccessPoint`/`LevelSelectKiosk` — dedicated
+  single-purpose networked component, no `DefaultNetworkPrefabs`
+  registration needed since it's scene-placed). `EditorCommandStack`
+  gained a `Changed` event (fires on Run/Undo/Redo, not Clear);
+  `LevelEditorController` forwards it as `BlueprintChanged`, also firing
+  on `NewBlueprint()`/`LoadBlueprint()`. The host broadcasts its current
+  blueprint as JSON (`[Rpc(SendTo.NotServer)]`) on every change; new
+  `LevelEditorController.ApplyRemoteBlueprint(BlueprintData)` rebuilds the
+  client's local `Blueprint`/visuals from it without touching the
+  (host-only) command stack. Late joiners covered for free: a non-host's
+  `OnNetworkSpawn` requests the current blueprint
+  (`[Rpc(SendTo.Server, InvokePermission = Everyone)]`), which the host
+  answers through the same broadcast path.
+  - **Flagged risk, unverified:** `[Rpc(SendTo.NotServer)]` (host → all
+    non-host clients) is used here for the first time in this codebase —
+    every other RPC target in the project is `SendTo.Server` or
+    `SendTo.Owner`. I'm confident from NGO's documented unified-RPC API
+    that `NotServer` is a valid `SendTo` enum member, but couldn't confirm
+    it against the actual package (no `Library/PackageCache` or NGO DLL
+    present in this environment to check). **Please confirm this compiles
+    when next opened in the Editor.**
+  - New files: `Assets/Scripts/LevelEditor/LevelEditorBlueprintSync.cs`
+    (+ hand-created `.cs.meta`, guid `dfe6a1668a654375988fb509ea7ba939`).
+  - `LevelEditor.unity`: added the `LevelEditorBlueprintSync` GameObject as
+    a new scene root, verified no duplicate fileIDs afterward.
+
+### Q3 — Game1 player spawn placement
+
+Cameron's answer: position players using the blueprint's `playerSpawns`
+array; for players beyond the defined spawn count, offset them 3 units
+away in a random cardinal direction so they don't stack.
+
+- `BuildSystem.GetPlayerSpawnPosition()` (server-only) hands out
+  `CurrentBlueprint.playerSpawns` in order via a new `_nextPlayerSpawnIndex`
+  counter that resets naturally every Game1 load (lives on `BuildSystem`,
+  whose `Awake()` runs fresh each scene load). Once every defined spawn is
+  handed out once, further calls cycle back through them with a random
+  offset from a new 4-entry `OverflowSpawnOffsets` array (±3 units on X or
+  Z).
+- `NetworkPlayer.OnActiveSceneChanged` now calls this (server-side only,
+  guarded by `IsServer`) whenever the active scene becomes `Game1`, and
+  relays the result to the owning client via a new `[Rpc(SendTo.Owner)]
+  TeleportToRpc(Vector3)` — same RPC-target pattern as the proven
+  `HubPlayerState.TeleportToRpc`. Disables/re-enables the new
+  `characterController` field around the position set (CharacterController
+  caches velocity/position internally; setting `transform.position`
+  directly while it's enabled can fight the controller next physics
+  step — same reasoning `HubPlayerState` already uses for its own
+  teleport).
+  - `Player.prefab`: added the `characterController` reference, pointing
+    at the same `CharacterController` component `HubPlayerState` already
+    uses.
+
+### Open items for Cameron to review
+
+- `[Rpc(SendTo.NotServer)]` in `LevelEditorBlueprintSync.cs` — first use
+  of this RPC target in the codebase, not compile-verified (no Editor
+  available this session). Please confirm it builds.
+- None of this session's changes (Q1 gating/sync, Q3 spawn placement) have
+  been run or visually checked — no Unity Editor in this environment.
+  Please playtest: (a) a non-host client in `LevelEditor` sees the host's
+  edits live and can't edit anything themselves, (b) a late joiner who
+  connects while the host is already in `LevelEditor` gets the current
+  blueprint, (c) players spawn at the blueprint's `playerSpawns` positions
+  in `Game1` instead of the origin.
+- `BuildTile` real per-material textures (Wood now exists as an asset, but
+  not wired onto `BuildTile` itself — see Q4 above) still needs Gilbert's
+  input on how it should interact with the build-state tint.

@@ -39,6 +39,13 @@ public class LevelEditorUI : MonoBehaviour
         EnsureStyles();
         _panelRects.Clear();
 
+        if (!controller.IsHost)
+        {
+            GUI.Label(new Rect(10, 10, 420, 20), "Spectating -- only the host can edit. Pan with WASD, scroll to zoom.");
+            IsPointerOverUI = false;
+            return;
+        }
+
         if (controller.Mode == LevelEditorController.EditorMode.Preview)
         {
             GUI.Label(new Rect(10, 10, 400, 20), "Preview Mode -- WASD move, mouse look, ESC to exit");

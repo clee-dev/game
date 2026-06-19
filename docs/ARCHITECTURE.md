@@ -119,6 +119,14 @@ clients use to request a scene load (NGO's `NetworkSceneManager.LoadScene` is
 server-only) — used by both `PauseMenu.LeaveToHub()` and
 `LevelEditorAccessPoint.EnterLevelEditorRpc()`.
 
+**Updated (Part C):** gained a `characterController` field and a Game1 spawn
+hook. When `OnActiveSceneChanged` fires with `current.name == "Game1"`, the
+server calls `BuildSystem.Instance.GetPlayerSpawnPosition()` and sends the
+result to the owning client via `[Rpc(SendTo.Owner)] TeleportToRpc(Vector3)`
+(same target pattern as `HubPlayerState.TeleportToRpc`), which disables the
+`CharacterController` for the one frame it sets `transform.position` so the
+controller doesn't fight the teleport next physics step.
+
 `HubPlayerState` — Hub-specific spawn handling. Positions player at a
 `HubSpawnPoints` location.
 
@@ -191,6 +199,15 @@ that billboards toward local camera while visible.
 
 `BuildSystem` — orchestrator. Loads blueprint via `BlueprintLoader`. Builds
 position/state lookups. Spawns tile/zone/depot/station prefabs server-side only.
+
+**Player spawn placement (Part C):** `GetPlayerSpawnPosition()` (server-only)
+hands out `CurrentBlueprint.playerSpawns` in order via `_nextPlayerSpawnIndex`,
+which resets naturally every Game1 load (lives on `BuildSystem`, whose
+`Awake()` runs fresh each scene load). Once every defined spawn has been
+handed out once, further calls cycle back through them with a random offset
+from `OverflowSpawnOffsets` (±3 units, X or Z) so extra players don't stack on
+an existing one. Called from `NetworkPlayer.OnActiveSceneChanged` — see Player
+section above.
 
 **Dependency rules (implemented):**
 - Foundation: no dependencies
@@ -337,6 +354,36 @@ replacing an existing spawn never changes the count.
 Menu" below — `LevelEditorController` now has a `pauseCanvas` field toggled off
 during Preview Mode to avoid a double-Escape-handler conflict with
 `LevelEditorPreviewController`.
+
+**Multiplayer access model + host-only editing (Part C, new):** any connected
+player can be in `LevelEditor.unity` together, but only the host edits.
+`LevelEditorController` gained a static `Instance` (matching
+`BuildSystem.Instance`/`HubSpawnPoints.Instance`) and `bool IsHost =>
+NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer`.
+`Update()` and `LevelEditorUI.OnGUI()` both return immediately for non-hosts
+before processing any editing input — non-hosts see a "Spectating" label
+instead of the tool panels but keep camera pan/zoom.
+
+Non-host clients see the host's edits live via new
+`LevelEditorBlueprintSync : NetworkBehaviour`, on its own scene-placed
+`NetworkObject` (same pattern as `LevelEditorAccessPoint`/`LevelSelectKiosk` —
+no `DefaultNetworkPrefabs` registration needed). `EditorCommandStack` gained a
+`Changed` event (fires on `Run`/`Undo`/`Redo`, not `Clear`), which
+`LevelEditorController` forwards as `BlueprintChanged` (also fired from
+`NewBlueprint()`/`LoadBlueprint()`). The host broadcasts its current
+blueprint as JSON via `[Rpc(SendTo.NotServer)]` on every `BlueprintChanged`;
+clients rebuild their local view via new
+`LevelEditorController.ApplyRemoteBlueprint(BlueprintData)`, which replaces
+`Blueprint`, clears the (host-only) command stack, and refreshes visuals.
+Late joiners are covered by the same path: a non-host's `OnNetworkSpawn`
+requests the current blueprint via
+`[Rpc(SendTo.Server, InvokePermission = Everyone)]`, which the host answers
+through the same broadcast method.
+
+**Flagged, unverified:** `[Rpc(SendTo.NotServer)]` is this codebase's first
+use of that RPC target (everything else is `SendTo.Server`/`SendTo.Owner`).
+No Unity Editor/NGO package was available to compile-check it this session —
+confirm it builds.
 
 ---
 
