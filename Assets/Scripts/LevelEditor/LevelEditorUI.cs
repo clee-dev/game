@@ -87,7 +87,9 @@ public class LevelEditorUI : MonoBehaviour
         if (GUILayout.Button("Preview", GUILayout.Width(80))) controller.SetMode(LevelEditorController.EditorMode.Preview);
 
         GUILayout.Space(20);
-        GUILayout.Label($"Layer: {controller.CurrentLayer + 1}/{controller.Blueprint.GridSize.y}  ([ / ])", GUILayout.Width(170));
+        if (GUILayout.Button("◀", GUILayout.Width(24))) controller.SetLayer(controller.CurrentLayer - 1);
+        GUILayout.Label($"Layer: {controller.CurrentLayer + 1}/{controller.Blueprint.GridSize.y}", GUILayout.Width(80));
+        if (GUILayout.Button("▶", GUILayout.Width(24))) controller.SetLayer(controller.CurrentLayer + 1);
         GUILayout.FlexibleSpace();
 
         if (!string.IsNullOrEmpty(controller.PlacementWarning))
