@@ -67,7 +67,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 6a226655efb9f9844ad8948705a5ad98, type: 2}
+  - {fileID: 2100000, guid: 58afebace2164cc4499fc6ef0f65f9df, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -126,9 +126,9 @@ GameObject:
   - component: {fileID: 6190780534038347513}
   - component: {fileID: 7457676030516436619}
   - component: {fileID: 1945162110774385777}
-  - component: {fileID: 2932651196549032005}
+  - component: {fileID: 3289289382423367029}
   m_Layer: 0
-  m_Name: WoodPlank
+  m_Name: Trowel
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -210,7 +210,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
-  GlobalObjectIdHash: 2112777319
+  GlobalObjectIdHash: 2914853317
   InScenePlacedSourceGlobalObjectIdHash: 0
   DeferredDespawnTick: 0
   Ownership: 1
@@ -282,7 +282,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PhysicsPickup
   ShowTopMostFoldoutHeaderGroup: 1
---- !u!114 &2932651196549032005
+--- !u!114 &3289289382423367029
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -291,8 +291,8 @@ MonoBehaviour:
   m_GameObject: {fileID: 8421532194043222775}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 94e4c4b57eaea9a42b10671a02b63491, type: 3}
+  m_Script: {fileID: 11500000, guid: 01afdaed7e9a0a3489dcacc202acb932, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::MaterialItem
+  m_EditorClassIdentifier: Assembly-CSharp::ToolItem
   ShowTopMostFoldoutHeaderGroup: 1
-  materialType: 0
+  toolType: 1
