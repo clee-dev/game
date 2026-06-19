@@ -234,6 +234,51 @@ is actually visible through transparency instead of solid-colored.
 
 ---
 
+### Timer System (Phase B)
+
+`LevelTimer` — in-scene-placed `NetworkObject` in `Game1.unity` (same pattern as
+`LevelEditorBlueprintSync` in `LevelEditor.unity` — no `DefaultNetworkPrefabs`
+entry, never runtime-instantiated). `NetworkVariable<float> _remainingTime`,
+server-authoritative. On `OnNetworkSpawn`, the server seeds it from
+`BuildSystem.Instance.CurrentBlueprint.contractDefaults.timeLimitSeconds` (already
+present in every current blueprint JSON — no separate Contract System needed for
+this). Server `Update()` ticks it down; every machine's local
+`_remainingTime.OnValueChanged` callback (not just the server's) calls
+`BuildSystem.EvaluateCompletion(forced: true)` the instant the replicated value
+crosses zero, mirroring `BuildTile`'s `_state.OnValueChanged` pattern so the
+level-end signal fires identically everywhere, not just server-side.
+
+`BuildSystem.EvaluateCompletion(bool forced = false)` — the shared level-end
+evaluation both the timer and natural completion route through.
+`BuildTile.OnStateChanged` calls it (unforced) every time a tile becomes `Built`;
+it's a no-op until `BuiltTileCount() == TotalTiles`. `LevelTimer` calls it forced
+on expiry, ending the level at whatever completion percentage was reached.
+Guarded by `BuildSystem.LevelEnded` so it only ever fires once. Success is
+`CompletionPercent >= contractDefaults.completionThresholds.full`. Fires
+`GameEvents.OnLevelEnded(bool success, float completionPercent)`.
+
+`LevelTimerHUD` — plain `MonoBehaviour` on `TimerCanvas` (screen-space overlay,
+always visible, not gated by `PauseMenu`). Formats `LevelTimer.Instance.RemainingTime`
+as `MM:SS` every frame; swaps to a "Complete!" / "Time's Up" message on
+`GameEvents.OnLevelEnded`.
+
+**Scoped out of this pass (still open in `PLANNED_FEATURES.md`):** the full
+Contract System (`ContractData`/`ContractManager`, contract selection screen),
+payout calculation, and the post-level scene transition back to the Hub. Those
+are listed under Win/Loss Conditions / Phase C Economy and weren't part of the
+Timer System's own "what to build" list — `GameEvents.OnLevelEnded` is the hook
+future work on those should subscribe to rather than re-deriving completion logic.
+
+**Unverified — no Unity Editor available this session:** the new `LevelTimer`
+NetworkObject and `TimerCanvas` in `Game1.unity` were hand-authored as Force-Text
+YAML (new `GlobalObjectIdHash`, new fileIDs in the `5200000` range, checked for
+zero collisions against the rest of the file) rather than added in-Editor. Please
+open `Game1.unity` once and confirm: the countdown counts down and displays
+correctly, the text position/size reads fine on screen, and a full build triggers
+the "Complete!" message while running out the clock triggers "Time's Up".
+
+---
+
 ### Supply & Tool Depots
 
 `SupplyZoneSpawner` / `ToolDepotSpawner` — plain (non-NetworkObject) MonoBehaviours,

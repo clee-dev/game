@@ -340,3 +340,95 @@ No data was lost; this only affected `Hub.unity`. Worth knowing for next
 session: something else (another session/branch) is also pushing to this
 same branch — check `git log origin/<branch>` before assuming local state
 is current.
+
+---
+
+## 2026-06-19 (Part D)
+
+**Context:** "Look at my claude.md file and doc folder containing my game
+structure. If there are no pending items, i want you to work on implementing
+the timer system phase B." Audited `CLAUDE.md` + `docs/` for pending work
+first, per the standing instruction. No Unity Editor available this session
+either — all `.unity` changes hand-edited as Force-Text YAML and verified by
+direct read/fileID cross-reference, **not compiled or opened in-Editor**.
+
+### Audit result
+
+One real pending item found: `docs/wiring/trowel-and-torch-tool-prefabs.md`
+(Phase A material loop — duplicate Hammer.prefab into Trowel/WeldingTorch,
+register in `DefaultNetworkPrefabs.asset`, wire into `ToolDepotSpawner`; pure
+Editor wiring, no code). This blocks Phase A, not Phase B, so it's orthogonal
+to the requested task rather than a blocker for it. Left untouched this
+session — still pending, needs Cameron's Editor access to do the prefab
+duplication.
+
+No other pending items found. Proceeded to Timer System Phase B per the
+conditional instruction.
+
+### Timer System (Phase B) — implemented
+
+See `docs/PLANNED_FEATURES.md` (Timer System section) and
+`docs/ARCHITECTURE.md` (new "Timer System (Phase B)" section) for the full
+write-up. Summary:
+
+- **Skipped the nominal Contract System dependency.** `PLANNED_FEATURES.md`
+  listed "Contract system (Phase B)" as a dependency for the timer, but
+  `BlueprintData.contractDefaults` (`timeLimitSeconds`,
+  `completionThresholds`) already existed in code and is already populated
+  in all three blueprint JSONs (`blueprint_001.json`, `blueprint_new.json`,
+  `blueprint_meow.json`). Read this directly instead of building
+  `ContractData`/`ContractManager` — treated as using already-decided data
+  plumbing, not inventing new design. The full Contract System (a manager
+  object contract selection screens would write to) is still open.
+- **New:** `LevelTimer` (`Assets/Scripts/Build/LevelTimer.cs`) — scene-placed
+  `NetworkBehaviour`, mirrors the existing `LevelEditorBlueprintSync` pattern
+  (own `NetworkObject`, no prefab registration needed). Seeds a
+  `NetworkVariable<float>` from `contractDefaults.timeLimitSeconds` on
+  spawn, ticks down server-side in `Update()`, and reacts to its own
+  `OnValueChanged` (fires identically on host and clients, same pattern as
+  `BuildTile._state.OnValueChanged`) to call
+  `BuildSystem.EvaluateCompletion(forced: true)` exactly once when it
+  crosses zero.
+- **New:** `BuildSystem.EvaluateCompletion(bool forced = false)` +
+  `LevelEnded` guard flag. Called from both `BuildTile.OnStateChanged` (natural
+  completion, no `forced` arg) and `LevelTimer` (forced). Compares
+  `CompletionPercent` against `contractDefaults.completionThresholds.full` and
+  fires the new `GameEvents.OnLevelEnded(bool success, float
+  completionPercent)`.
+- **New:** `LevelTimerHUD` (`Assets/Scripts/Build/LevelTimerHUD.cs`) — plain
+  `MonoBehaviour`, MM:SS countdown text, swaps to "Complete!" /
+  "Time's Up — N%" on `GameEvents.OnLevelEnded`.
+  - **Project rule applied:** `TextMeshProUGUI.m_RaycastTarget: 0` per
+    CLAUDE.md's "All display TextMeshPro elements: Raycast Target =
+    unchecked."
+- **Deliberately not built:** payout calculation and the post-level scene
+  transition (full "Win/Loss Conditions" feature) — both remain open in
+  `PLANNED_FEATURES.md`, scoped to listen on the new `GameEvents.OnLevelEnded`
+  event once built. Keeping this pass scoped to "timer ticks down, level-end
+  evaluation fires" per the task name.
+- **`Game1.unity` scene wiring (unverified, no Editor):** added a
+  `LevelTimer` GameObject (NetworkObject + `LevelTimer` component, fileIDs
+  `5200001`–`5200004`) and a `TimerCanvas` → `TimerText` hierarchy (screen-space
+  overlay, top-center anchored, fileIDs `5200010`–`5200023`) modeled on the
+  scene's existing `PauseCanvas` Canvas/CanvasScaler settings. Both added to
+  `SceneRoots.m_Roots`. Verified zero duplicate fileIDs afterward
+  (`grep -oP '^--- !u!\d+ &\K\d+' Assets/Scenes/Game1.unity | sort -n | uniq -c | sort -rn`
+  — every fileID appears exactly once). **Please open `Game1.unity` in the
+  Editor and confirm:** the timer text is positioned/sized sensibly, the
+  countdown actually ticks and the level-end message swap reads correctly
+  in a live test.
+- New `.meta` files hand-created for both new scripts
+  (`LevelTimer.cs.meta` guid `416a25d126334f5d9ac75f0e37e006b2`,
+  `LevelTimerHUD.cs.meta` guid `0c7949acfed94b10a714b23ac4d735e2`).
+
+### Open items for Cameron to review
+
+- `docs/wiring/trowel-and-torch-tool-prefabs.md` still pending (Phase A,
+  unrelated to this session, not actioned).
+- `Game1.unity`'s new `LevelTimer`/`TimerCanvas` wiring is unverified —
+  no Unity Editor available this session. Please open and playtest: timer
+  counts down, HUD text reads correctly, level ends (success and forced-by-
+  timer-expiry paths) trigger the right message.
+- No compiler available either (`unity`/`dotnet`/`mcs`/`csc` all absent from
+  this environment) — all new C# was manually re-read for syntax errors, not
+  compiled. Please build once before relying on this.
