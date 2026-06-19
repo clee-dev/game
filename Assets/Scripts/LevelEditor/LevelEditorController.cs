@@ -40,6 +40,10 @@ public class LevelEditorController : MonoBehaviour
     public int CurrentLayer { get; private set; }
     public Vector3Int? SelectedTilePos { get; private set; }
 
+    /// <summary>Set whenever a placement/type-change is rejected by the structural
+    /// dependency rule below; LevelEditorUI surfaces it to the designer.</summary>
+    public string PlacementWarning { get; private set; } = "";
+
     // Brush state -- read/written directly by LevelEditorUI.
     public TileType BrushTileType = TileType.Foundation;
     public MaterialType BrushMaterial = MaterialType.Wood;
@@ -162,6 +166,12 @@ public class LevelEditorController : MonoBehaviour
             return;
         }
 
+        if (!CanPlaceTileType(BrushTileType, pos))
+        {
+            PlacementWarning = BuildPlacementWarning(BrushTileType);
+            return;
+        }
+
         var newTile = new TileData
         {
             id = Blueprint.NextTileId(),
@@ -177,6 +187,38 @@ public class LevelEditorController : MonoBehaviour
             undo: () => { Blueprint.Tiles.Remove(pos); RefreshTileVisual(pos); }));
 
         SelectedTilePos = pos;
+        PlacementWarning = "";
+    }
+
+    // -------------------------------------------------------------------------
+    // Structural dependency rule (Systems Architecture, Section 6.3) -- the same rule
+    // BuildSystem uses to decide runtime build eligibility, applied here against tile
+    // *existence* in the blueprint rather than TileState.Built, so the editor can't
+    // author a layout that would never be buildable (e.g. a Wall with no Floor below,
+    // or Furniture floating with nothing under it).
+    // -------------------------------------------------------------------------
+
+    public bool CanPlaceTileType(TileType type, Vector3Int pos) =>
+        TileStructuralRules.HasSupport(type, pos, Blueprint.Tiles.ContainsKey);
+
+    private static string BuildPlacementWarning(TileType type)
+    {
+        switch (type)
+        {
+            case TileType.Floor:
+            case TileType.Wall:
+            case TileType.Column:
+            case TileType.Furniture:
+                return $"Cannot place {type} here -- needs a tile below it first.";
+
+            case TileType.Window:
+            case TileType.Door:
+            case TileType.Decor:
+                return $"Cannot place {type} here -- needs an adjacent tile to attach to.";
+
+            default:
+                return $"Cannot place {type} here.";
+        }
     }
 
     private void EraseTile(Vector3Int pos)
@@ -195,7 +237,18 @@ public class LevelEditorController : MonoBehaviour
 
     public void DeselectTile() => SelectedTilePos = null;
 
-    public void SetSelectedTileType(TileType type) => MutateSelectedTile(t => t.type = type.ToString().ToLowerInvariant());
+    public void SetSelectedTileType(TileType type)
+    {
+        if (SelectedTilePos.HasValue && !CanPlaceTileType(type, SelectedTilePos.Value))
+        {
+            PlacementWarning = BuildPlacementWarning(type);
+            return;
+        }
+
+        PlacementWarning = "";
+        MutateSelectedTile(t => t.type = type.ToString().ToLowerInvariant());
+    }
+
     public void SetSelectedTileMaterial(MaterialType material) => MutateSelectedTile(t => t.requiredMaterial = material.ToString().ToLowerInvariant());
     public void SetSelectedTileTool(ToolType tool) => MutateSelectedTile(t => t.requiredTool = tool.ToString().ToLowerInvariant());
     public void SetSelectedTileHealth(int health) => MutateSelectedTile(t => t.health = Mathf.Max(1, health));

@@ -29,6 +29,7 @@ public class LevelEditorUI : MonoBehaviour
 
     private GUIStyle _boldLabel;
     private GUIStyle _centeredLabel;
+    private GUIStyle _warningLabel;
     private bool _stylesReady;
 
     private readonly List<Rect> _panelRects = new();
@@ -60,6 +61,8 @@ public class LevelEditorUI : MonoBehaviour
         if (_stylesReady) return;
         _boldLabel = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold };
         _centeredLabel = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter };
+        _warningLabel = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        _warningLabel.normal.textColor = new Color(1f, 0.35f, 0.3f);
         _stylesReady = true;
     }
 
@@ -85,6 +88,10 @@ public class LevelEditorUI : MonoBehaviour
 
         GUILayout.Space(20);
         GUILayout.Label($"Layer: {controller.CurrentLayer + 1}/{controller.Blueprint.GridSize.y}  ([ / ])", GUILayout.Width(170));
+        GUILayout.FlexibleSpace();
+
+        if (!string.IsNullOrEmpty(controller.PlacementWarning))
+            GUILayout.Label(controller.PlacementWarning, _warningLabel, GUILayout.Width(420));
         GUILayout.FlexibleSpace();
 
         GUI.enabled = controller.Commands.CanUndo;

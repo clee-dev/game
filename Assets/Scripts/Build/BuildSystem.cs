@@ -49,11 +49,6 @@ public class BuildSystem : MonoBehaviour
     private readonly Dictionary<Vector3Int, TileData> _tileDataByPosition = new();
     private readonly Dictionary<Vector3Int, BuildTile> _liveTilesByPosition = new();
 
-    private static readonly Vector3Int[] HorizontalNeighbors =
-    {
-        Vector3Int.left, Vector3Int.right, Vector3Int.forward, Vector3Int.back
-    };
-
     private void Awake()
     {
         Instance = this;
@@ -131,31 +126,8 @@ public class BuildSystem : MonoBehaviour
     // Structural dependency rules (Systems Architecture, Section 6.3)
     // -------------------------------------------------------------------------
 
-    public bool IsEligible(BuildTile tile)
-    {
-        switch (tile.Type)
-        {
-            case TileType.Foundation:
-                return true;
-
-            case TileType.Floor:
-            case TileType.Wall:
-            case TileType.Column:
-            case TileType.Furniture:
-                return IsBuiltAt(tile.GridPosition + Vector3Int.down);
-
-            case TileType.Window:
-            case TileType.Door:
-            case TileType.Decor:
-                foreach (var dir in HorizontalNeighbors)
-                    if (IsBuiltAt(tile.GridPosition + dir))
-                        return true;
-                return false;
-
-            default:
-                return false;
-        }
-    }
+    public bool IsEligible(BuildTile tile) =>
+        TileStructuralRules.HasSupport(tile.Type, tile.GridPosition, IsBuiltAt);
 
     private bool IsBuiltAt(Vector3Int pos)
     {
@@ -171,7 +143,7 @@ public class BuildSystem : MonoBehaviour
     {
         GetLiveTileAt(pos + Vector3Int.up)?.RefreshEligibility();
         GetLiveTileAt(pos + Vector3Int.down)?.RefreshEligibility();
-        foreach (var dir in HorizontalNeighbors)
+        foreach (var dir in TileStructuralRules.HorizontalNeighbors)
             GetLiveTileAt(pos + dir)?.RefreshEligibility();
     }
 
