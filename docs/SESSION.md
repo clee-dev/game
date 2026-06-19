@@ -319,3 +319,24 @@ away in a random cardinal direction so they don't stack.
 - `BuildTile` real per-material textures (Wood now exists as an asset, but
   not wired onto `BuildTile` itself — see Q4 above) still needs Gilbert's
   input on how it should interact with the build-state tint.
+
+### Branch divergence caught at push time
+
+Pushing this session's work hit a rejected push — `origin/claude/relaxed-mccarthy-lqg4dc`
+had moved on (commit `423f570`, "Merge branch 'main' into ...") since the
+local branch last synced. That remote commit was a *second, independent*
+merge of the same `e357fe5`/`d52e5f9` pair the Part B session had already
+merged locally as `4b4b086` — same parents, different resolution. Diffing
+the two merge results showed the difference was confined to `Hub.unity`:
+the remote's merge was a naive auto-merge that kept **both** the no-visual
+`LevelSelectKiosk` (Part B's placeholder placement) and Cameron's
+with-Cylinder one, reintroducing the exact duplicate-kiosk problem Part B's
+manual merge had deliberately resolved by removing the placeholder.
+Resolved by merging origin in locally and keeping the deduplicated
+`SceneRoots` entry (Cameron's kiosk, `fileID 1276837211`) over the
+dangling duplicate — verified zero duplicate fileIDs and exactly one
+`LevelSelectKiosk`/`LevelEditorAccessPoint` each afterward, then pushed.
+No data was lost; this only affected `Hub.unity`. Worth knowing for next
+session: something else (another session/branch) is also pushing to this
+same branch — check `git log origin/<branch>` before assuming local state
+is current.
