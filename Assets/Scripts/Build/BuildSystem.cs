@@ -192,4 +192,28 @@ public class BuildSystem : MonoBehaviour
 
     public float CompletionPercent =>
         TotalTiles == 0 ? 0f : (float)BuiltTileCount() / TotalTiles;
+
+    // -------------------------------------------------------------------------
+    // Level end (Phase B Timer System / Win-Loss Conditions, PLANNED_FEATURES.md)
+    // -------------------------------------------------------------------------
+
+    public bool LevelEnded { get; private set; }
+
+    /// <summary>Decides success/failure once the level is over -- either naturally
+    /// (every tile Built, forced == false, called from BuildTile.OnStateChanged) or
+    /// forced by LevelTimer hitting zero (forced == true, evaluated at whatever
+    /// completion percentage was reached). Runs identically on every machine since both
+    /// triggers derive from already-replicated NetworkVariable state -- no IsServer
+    /// gating needed here. Payout calculation and the post-level scene transition are not
+    /// implemented yet (Win/Loss Conditions, still open in PLANNED_FEATURES.md); this just
+    /// fires the shared success/fail signal those will eventually consume.</summary>
+    public void EvaluateCompletion(bool forced = false)
+    {
+        if (LevelEnded) return;
+        if (!forced && BuiltTileCount() < TotalTiles) return;
+
+        LevelEnded = true;
+        float fullThreshold = CurrentBlueprint?.contractDefaults?.completionThresholds?.full ?? 1f;
+        GameEvents.FireLevelEnded(CompletionPercent >= fullThreshold, CompletionPercent);
+    }
 }

@@ -123,7 +123,7 @@ Both need: prefab, `ToolItem` component, `ToolStats` values, depot spawner entry
 
 ## Phase B — Game Layer
 
-### Timer System
+### Timer System — Built
 
 **What it is:** A countdown per level set by the active contract. When it hits zero,
 the level ends with whatever completion percentage was reached.
@@ -132,13 +132,34 @@ the level ends with whatever completion percentage was reached.
 - Timer is server-authoritative, synced to all clients via `NetworkVariable<float>`
 - Visible to all players (world-space HUD or screen UI)
 - When timer expires, trigger same completion evaluation as manual completion
+- Did not wait on the full Contract System below — `BlueprintData.contractDefaults`
+  (`timeLimitSeconds`, `completionThresholds`) already existed and is already
+  populated in every blueprint JSON, so `LevelTimer` reads it directly. The
+  Contract System's `ContractData`/`ContractManager` layer is still open (see
+  below) for anything beyond a single hardcoded-per-blueprint contract.
 
-**What to build:**
-- `LevelTimer` NetworkBehaviour with `NetworkVariable<float>` countdown
-- Hook into `BuildSystem` completion evaluation
-- Client-side display
+**Built:**
+- `LevelTimer` (`Assets/Scripts/Build/LevelTimer.cs`) — scene-placed
+  `NetworkBehaviour`, seeds `NetworkVariable<float>` from
+  `BuildSystem.CurrentBlueprint.contractDefaults.timeLimitSeconds` on spawn,
+  ticks down server-side, fires `BuildSystem.EvaluateCompletion(forced: true)`
+  via its own `OnValueChanged` (so every machine, not just the server, reacts
+  identically) when it crosses zero.
+- `BuildSystem.EvaluateCompletion(bool forced)` — shared by natural completion
+  (`BuildTile.OnStateChanged`, all tiles Built) and forced (timer expiry).
+  Guards against firing twice, compares `CompletionPercent` against
+  `contractDefaults.completionThresholds.full`, fires `GameEvents.OnLevelEnded`.
+- `GameEvents.OnLevelEnded` — new event, decouples consumers from `BuildSystem`.
+- `LevelTimerHUD` (`Assets/Scripts/Build/LevelTimerHUD.cs`) — MM:SS display,
+  swaps to "Complete!" / "Time's Up — N%" on level end.
+- Scene wiring in `Game1.unity` (hand-edited YAML, **unverified in-Editor** —
+  see `docs/SESSION.md`).
 
-**Dependencies:** Contract system (Phase B), `BuildSystem`
+**Explicitly not built (out of scope for this pass):** payout calculation,
+post-level scene transition — see Win/Loss Conditions below.
+
+**Dependencies:** `BuildSystem` (satisfied). Contract system below is no longer
+a hard dependency for the MVP timer.
 
 ---
 
@@ -167,7 +188,7 @@ materials, active modifiers, base payout, and partial-payout thresholds.
 
 ---
 
-### Win / Loss Conditions
+### Win / Loss Conditions — partially built
 
 **What it is:** Level ends when the blueprint reaches 100% completion OR the timer
 expires. Outcome (success/failure) determines payout.
@@ -177,11 +198,59 @@ expires. Outcome (success/failure) determines payout.
 - `BuildSystem` fires an event when all required tiles are Built
 - Timer expiry also triggers end
 
-**What to build:**
-- Completion percentage calculation in `BuildSystem`
-- Level-end trigger (both paths: completion event and timer expiry)
-- Payout calculation based on completion % and `CompletionThresholds`
-- Scene transition back to contract selection (or Hub) after results
+**Built (as part of Timer System above):**
+- Completion percentage calculation in `BuildSystem` (`CompletionPercent`,
+  pre-existing)
+- Level-end trigger, both paths: `BuildTile.OnStateChanged` (natural, all tiles
+  Built) and `LevelTimer` expiry (forced) both route through
+  `BuildSystem.EvaluateCompletion`, which fires `GameEvents.OnLevelEnded(bool
+  success, float completionPercent)`
+- Scene transition back to the Hub — manual, via the Level Summary UI's
+  "Return to Hub" button (see Level Summary below), not automatic
+
+**Still to build:**
+- Payout calculation based on completion % and `CompletionThresholds` (a
+  listener on `GameEvents.OnLevelEnded`, not yet written)
+
+---
+
+### Level Summary — partially built
+
+**What it is:** Screen shown when a level ends (`GameEvents.OnLevelEnded`),
+reporting the outcome and eventually a per-player "blame summary" (who made
+the most mistakes, who carried the most/least, death count, etc.), with a
+button to return to the Hub.
+
+**Built:**
+- `LevelSummaryUI` (`Assets/Scripts/Build/LevelSummaryUI.cs`) — listens for
+  `GameEvents.OnLevelEnded`, shows `resultText` ("Level Complete" / "Time's
+  Up") and `completionText` (`N% Built`), unlocks the cursor
+- `Return to Hub` button — relays through the local player's
+  `NetworkPlayer.RequestLoadSceneRpc("Hub")`, same mechanism `PauseMenu`'s
+  "Leave to Hub" uses
+- Scene wiring in `Game1.unity`: `SummaryCanvas` → `SummaryPanel` →
+  `ResultText` / `CompletionText` / `ReturnToHubButton`, hand-edited YAML,
+  **unverified in-Editor** — see `docs/SESSION.md`
+
+**Still to build — blame summary (explicitly deferred, not started):**
+- Per-player stat tracking during the level: mistakes (wrong material placed?
+  wasted material? TBD what counts as a "mistake"), deaths, materials
+  carried/delivered, builds completed, etc. — none of this is tracked
+  anywhere yet, this needs new systems, not just UI
+- The actual blame summary display (leaderboard-style breakdown per player)
+- **Reserved slot:** `LevelSummaryUI.blameSummaryRoot` — an inactive, empty
+  `RectTransform` (`BlameSummaryRoot`, inside `SummaryPanel` in `Game1.unity`)
+  is where this goes once built. Don't repurpose this GameObject for anything
+  else.
+
+**Open questions:**
+- What exactly counts as a "mistake" for blame purposes? (wrong material on a
+  tile, wasted/dropped materials, time spent idle, etc. — needs Cameron's call)
+- Where does per-player stat tracking live — on `NetworkPlayer` itself, or a
+  separate stats-tracking NetworkBehaviour?
+- Does the blame summary need to be visible to all players at once (a single
+  synced ranking) or can each client compute it locally from already-synced
+  state?
 
 ---
 

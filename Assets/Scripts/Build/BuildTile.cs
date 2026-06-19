@@ -107,7 +107,10 @@ public class BuildTile : NetworkBehaviour
     {
         RefreshVisual();
         if (now == TileState.Built)
+        {
             BuildSystem.Instance.RefreshNeighborsOf(GridPosition);
+            BuildSystem.Instance.EvaluateCompletion();
+        }
     }
 
     public void RefreshEligibility() => RefreshVisual();
