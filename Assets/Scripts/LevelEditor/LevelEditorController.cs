@@ -75,15 +75,26 @@ public class LevelEditorController : MonoBehaviour
     private readonly List<GameObject> _worldObjectVisuals = new();
     private readonly Dictionary<Color, Material> _materialCache = new();
 
+    /// <summary>Wall connection variant + Y rotation per Wall tile position (Smart Wall
+    /// System, Section 10), author-time mirror of BuildTile's runtime _wallMask --
+    /// existence-based instead of state-based, same as CanPlaceTileType's structural
+    /// check, since the editor's blueprint has no concept of MaterialPlaced/Built.
+    /// Rebuilt in full on every blueprint change rather than incrementally -- the
+    /// blueprint is small enough that a full pass is fine, and it's the only option for
+    /// undo/redo, which don't expose which position they touched.</summary>
+    private readonly Dictionary<Vector3Int, (WallMeshVariant variant, float yRotation)> _editorWallVariants = new();
+
     private LevelEditorPreviewController _activePreview;
 
     private void Awake()
     {
         Instance = this;
         Commands.Changed += () => BlueprintChanged?.Invoke();
+        BlueprintChanged += () => { RebuildEditorWallVariants(); RefreshAllTileVisuals(); };
 
         _visualsRoot = new GameObject("EditorVisuals").transform;
         _visualsRoot.SetParent(transform);
+        RebuildEditorWallVariants();
         RefreshAllTileVisuals();
         RefreshWorldObjectVisuals();
     }
@@ -436,6 +447,29 @@ public class LevelEditorController : MonoBehaviour
         { TileType.Decor,      new Color(0.6f, 0.3f, 0.7f) },
     };
 
+    /// <summary>Recomputes every Wall tile's connection mask from scratch against the
+    /// current Blueprint (Smart Wall System, Section 10). Called before every
+    /// RefreshAllTileVisuals() so CreateTileCube always has up-to-date rotation data to
+    /// read -- see _editorWallVariants for why this is a full pass instead of incremental.</summary>
+    private void RebuildEditorWallVariants()
+    {
+        _editorWallVariants.Clear();
+
+        foreach (var kvp in Blueprint.Tiles)
+        {
+            if (BlueprintEnums.ParseTileType(kvp.Value.type) != TileType.Wall) continue;
+
+            Vector3Int pos = kvp.Key;
+            byte mask = 0;
+            if (GetBlueprintTypeAt(pos + Vector3Int.forward) == TileType.Wall) mask |= WallVariantLookup.North;
+            if (GetBlueprintTypeAt(pos + Vector3Int.right) == TileType.Wall) mask |= WallVariantLookup.East;
+            if (GetBlueprintTypeAt(pos + Vector3Int.back) == TileType.Wall) mask |= WallVariantLookup.South;
+            if (GetBlueprintTypeAt(pos + Vector3Int.left) == TileType.Wall) mask |= WallVariantLookup.West;
+
+            _editorWallVariants[pos] = WallVariantLookup.GetVariant(mask);
+        }
+    }
+
     private void RefreshAllTileVisuals()
     {
         foreach (GameObject go in _tileVisuals.Values) Destroy(go);
@@ -467,6 +501,13 @@ public class LevelEditorController : MonoBehaviour
         float scale = onCurrentLayer ? CellSize * 0.85f : CellSize * 0.4f;
         go.transform.position = new Vector3((pos.x + 0.5f) * CellSize, pos.y * CellSize, (pos.z + 0.5f) * CellSize);
         go.transform.localScale = Vector3.one * scale;
+
+        // Smart Wall System (Section 10) -- a plain cube looks identical at every 90-degree
+        // Y rotation, so this is a no-op until wallMeshSet's prototype cubes are replaced
+        // with real modular wall meshes. The rotation is still applied now so the data path
+        // (mask -> variant -> rotation) is exercised and correct ahead of that swap.
+        if (_editorWallVariants.TryGetValue(pos, out var wallVariant))
+            go.transform.localEulerAngles = new Vector3(0f, wallVariant.yRotation, 0f);
 
         Color color = TileColors.TryGetValue(BlueprintEnums.ParseTileType(tile.type), out Color c) ? c : Color.white;
         if (!onCurrentLayer) color = Color.Lerp(color, Color.black, 0.6f);
@@ -558,6 +599,7 @@ public class LevelEditorController : MonoBehaviour
         Commands.Clear();
         SelectedTilePos = null;
         CurrentLayer = Mathf.Clamp(CurrentLayer, 0, Blueprint.GridSize.y - 1);
+        RebuildEditorWallVariants();
         RefreshAllTileVisuals();
         RefreshWorldObjectVisuals();
     }

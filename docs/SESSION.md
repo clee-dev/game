@@ -970,3 +970,116 @@ implementation, no duplication between materials and tools.
   material-cap slot.
 - Playtest Request 3: throw an item off the edge of the level (or otherwise
   get it below y = -40), confirm it despawns instead of falling forever.
+
+---
+
+## 2026-06-20 (Part D)
+
+**Context from Cameron:** "see my claude.md document. also see this smart wall
+system and start implementing" — supplied `SMART_WALLS_1.md`, a spec for
+bitmask autotiling on `TileType.Wall` build tiles (straight runs, corners,
+T-junctions, crosses should render distinctly instead of every Wall tile
+looking identical). Scope explicitly `TileType.Wall` only — Door/Window called
+out as out of scope. No Unity Editor or C# compiler available this session
+either — all changes hand-verified by direct read, **not compiled or opened
+in-Editor.**
+
+### Smart Wall System — implemented
+
+See `docs/ARCHITECTURE.md`'s new "Smart Wall System" section for full detail.
+Summary:
+
+- **New:** `WallMeshVariant.cs` (enum, the 6 mesh shapes), `WallVariantLookup.cs`
+  (static 16-entry bitmask → `(variant, yRotation)` table, bit constants
+  North=1/East=2/South=4/West=8), `WallMeshSet.cs` (a `[CreateAssetMenu]`
+  `ScriptableObject` holding one `Mesh` per variant — **the first custom
+  ScriptableObject in this codebase**).
+- **`BuildTile.cs`** — new server-write `NetworkVariable<byte> _wallMask`,
+  `RecalculateWallMask()` (checks the 4 horizontal neighbors via
+  `BuildSystem.GetLiveTileAt`, one bit per connected Wall neighbor that's
+  `MaterialPlaced`/`Built`), `RefreshVisual()` swaps `sharedMesh` on the
+  ghost/placed/built `MeshFilter`s and rotates `transform.localEulerAngles` to
+  match the resolved variant. Confirmed rotation-safe: `BuildTile.prefab`'s
+  `BoxCollider` is a symmetric `{1,1,1}` cube (resolves the spec's Open
+  Question #4 — not actually open).
+- **`BuildSystem.cs`** — `NotifyNeighborsForWallMask(Vector3Int)` (one-hop,
+  server-only, called from `BuildTile.OnStateChanged` whenever a Wall tile's
+  state changes) + a second pass in `SpawnFromBlueprint()` that calls
+  `RecalculateWallMask()` on every live Wall tile after the initial spawn loop
+  (needed since a tile spawned early in the loop can't see neighbors spawned
+  later in the same loop). Reused the existing `GetLiveTileAt` rather than
+  adding a new lookup — already exactly what the spec asked for.
+- **`LevelEditorController.cs`** — author-time mirror,
+  `_editorWallVariants` dictionary + `RebuildEditorWallVariants()`
+  (existence-based, same pattern as `CanPlaceTileType`'s structural check,
+  since the editor's blueprint has no `MaterialPlaced`/`Built` concept).
+  `CreateTileCube()` applies the resolved rotation to each preview cube.
+  **Adaptation from spec, not yet confirmed with Cameron:** the spec described
+  two separate mechanisms (incremental update for place/erase, full-rebuild for
+  undo/redo). Implemented as one full-rebuild on every `BlueprintChanged`
+  instead — `Commands.Changed`/`BlueprintChanged` fire identically for
+  Run/Undo/Redo with no way to tell which triggered it or what position
+  changed (command closures are opaque at the `EditorCommandStack` level), so
+  the incremental path can't actually be built for undo/redo anyway. The spec
+  itself notes the blueprint is small enough that a full pass is fine, which
+  justifies using that cheaper uniform approach everywhere instead of
+  maintaining two code paths. Please flag if a different split was intended.
+- **Asset wiring deferred, not hand-authored.** Per the established
+  TrashBin-prefab precedent (every `.prefab`/`.asset` instance in this repo's
+  history was Cameron-authored in-Editor, never by me), wrote
+  `docs/wiring/wall-mesh-set-default-asset.md` instead of hand-authoring
+  `WallMeshSet_Default.asset` directly. Until Cameron creates that asset
+  (6 Unity builtin Cube meshes for the prototype) and assigns it to
+  `BuildTile.prefab.wallMeshSet`, Wall tiles render exactly as before — `null`
+  `wallMeshSet` is a no-op in `RefreshVisual()`.
+- **`.meta` files hand-created** for the 3 new scripts, matching this repo's
+  established minimal 2-line convention (`fileFormatVersion: 2` + `guid:
+  <hex>`, no `MonoImporter` block) — confirmed by direct inspection of several
+  existing script `.meta` files before writing these, after first drafting them
+  with a verbose native-format block and self-catching the mismatch.
+
+### Open questions flagged for Cameron, not wired (per `SMART_WALLS_1.md`)
+
+- Door/Window tiles don't participate in wall connections at all — a Wall tile
+  next to one sees "no connection," same as empty space.
+- No diagonal connections — only the 4 cardinal neighbors are checked.
+- No vertical/multi-story connections — the mask is purely horizontal on one Y
+  layer.
+- (Y-rotation/collision safety was also an open question in the spec, but is
+  resolved — see above.)
+
+### Changes made this session
+
+- `Assets/Scripts/Build/WallMeshVariant.cs`, `WallVariantLookup.cs`,
+  `WallMeshSet.cs` — new, + hand-created `.meta` files.
+- `Assets/Scripts/Build/BuildTile.cs` — `_wallMask`, `RecalculateWallMask()`,
+  mesh/rotation logic in `RefreshVisual()`, trigger in `OnStateChanged`.
+- `Assets/Scripts/Build/BuildSystem.cs` — `NotifyNeighborsForWallMask()`,
+  second spawn pass in `SpawnFromBlueprint()`.
+- `Assets/Scripts/LevelEditor/LevelEditorController.cs` — `_editorWallVariants`,
+  `RebuildEditorWallVariants()`, rotation applied in `CreateTileCube()`,
+  rebuild wired into `Awake()`/`BlueprintChanged`/`ApplyRemoteBlueprint()`.
+- `docs/ARCHITECTURE.md` — new "Smart Wall System" section.
+- `docs/wiring/wall-mesh-set-default-asset.md` — new wiring doc for the
+  deferred `WallMeshSet_Default.asset` + prefab field assignment.
+- `docs/SESSION.md` — this entry.
+
+### Open items for Cameron to review
+
+- **Not compiled or run.** No Unity Editor or C# compiler available this
+  session — please confirm the project builds.
+- Build `WallMeshSet_Default.asset` and wire it onto `BuildTile.prefab` per
+  `docs/wiring/wall-mesh-set-default-asset.md` — this is the one piece that
+  genuinely cannot be done outside the Editor, and without it the feature is
+  code-complete but invisible (Wall tiles render exactly as before).
+- Playtest once wired: place single/adjacent/straight-run/corner/T/cross Wall
+  layouts in both `Game1` and the Level Editor, confirm meshes and rotations
+  match between the two and update live as tiles go
+  `Empty`→`MaterialPlaced`→`Built`→`Destroyed` (via the existing collapse
+  debug trigger) and back.
+- Confirm the Level Editor rebuild-mechanism simplification (one full-rebuild
+  on every change, vs. the spec's incremental + full-rebuild split) is
+  acceptable — see the adaptation note above.
+- The 4 open questions above (Door/Window, diagonal, vertical/multi-story
+  connections) are unresolved design decisions, not implementation gaps —
+  none are wired, all deliberately deferred per the spec's explicit scope.
