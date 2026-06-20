@@ -53,6 +53,10 @@ public class BuildTile : NetworkBehaviour
     public int MaxHealth { get; private set; }
     public TileState State => _state.Value;
 
+    /// <summary>Lets PlayerInteraction tint the ghost (valid/invalid placement preview)
+    /// via MaterialPropertyBlock without this class needing to know about that system.</summary>
+    public Renderer GhostRenderer => ghostRenderer;
+
     private readonly NetworkVariable<TileState> _state = new(
         TileState.Empty, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 

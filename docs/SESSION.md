@@ -728,3 +728,135 @@ cascade reuses it via `BuildSystem.IsEligible` instead.
   still missing.
 - Debug-only Backspace trigger is intentionally temporary — remove once
   chaos events (Phase D) provide the real trigger.
+
+---
+
+## 2026-06-20 (Part B)
+
+**Context from Cameron:** "I need to work on making the player feedback
+better when you can select items" — Cameron supplied a detailed spec
+(crosshair state, ghost tile tinting, pickup outline highlight via
+`MaterialPropertyBlock`) written by an assistant in a separate conversation
+that hadn't seen this codebase. No Unity Editor or C# compiler available this
+session either — hand-verified by direct read against the actual files, not
+compiled or opened in-Editor.
+
+### Adapted the spec to the real code rather than applying it verbatim
+
+The pasted spec assumed APIs that don't match what's actually here, so these
+were reconciled before implementing:
+- Spec proposed new `BuildTile.CanReceiveMaterial`/`CanBuildWith` helpers —
+  skipped, since `CanAcceptMaterial(MaterialType)`/`CanBuild(ToolType)` already
+  exist and do exactly this (used by `PlayerInteraction.UpdatePrompt` and
+  `HandleInteractPress` already). Adding parallel methods would have been a
+  pure duplicate.
+- Spec's `EvaluateFeedback` re-derived `hitObject.GetComponent<>()` from
+  scratch — `Update()` already extracts `tileTarget`/`pickupTarget`/etc. from
+  the one raycast it does per frame, so the new method takes those directly
+  instead of raycasting again or re-deriving them.
+- Spec didn't account for `TileState.Destroyed` (added in the structural
+  integrity session, same day, earlier) — a repairable `Destroyed` tile now
+  gets the same ghost-tint treatment as `Empty`, matching how
+  `CanAcceptMaterial` already treats the two states identically.
+- Spec's crosshair used a `CrosshairState.Build` case with no visual beyond a
+  white dot ("the hold-to-build progress bar already communicates this
+  state") — kept as specified, but also added a ring for that state since the
+  progress bar only appears after the player starts holding E, not before.
+- Spec's held-item type lookups (`GetHeldMaterialType`/`GetHeldToolType`) —
+  implemented inline as `_heldObject?.GetComponent<MaterialItem>()`/
+  `GetComponent<ToolItem>()`, the exact pattern already used three other
+  places in this same file (`HandleInteractPress`, `HandleContinuousBuild`,
+  `UpdatePrompt`), instead of adding two new wrapper methods for it.
+- Spec's crosshair redesign assumed no existing crosshair — there already
+  was one (a plain dot, yellow/white). Extended it in place rather than
+  building a parallel system: same `OnGUI`, same `GUI.DrawTexture`/
+  `Texture2D.whiteTexture` approach, just color-switched on the new
+  `CrosshairState` and a ring added via four thin bars (no new texture asset,
+  no `Awake`-time texture caching needed since `Texture2D.whiteTexture` is a
+  built-in).
+
+### Implemented
+
+- **`Assets/Shader/ToonLit.shader`** — `_OutlineColor` is now
+  `[PerRendererData]`. The fragment shader already returned `_OutlineColor`
+  directly (no hardcoded black to replace, unlike what the spec assumed).
+  Verified every material on this shader (`Wood`, `Concrete`, `Steel`, `Torch`,
+  `Trowel`, `ToonLit`, `Person`, `OrderStation`, `Black`, `Blue`, `Green`, `Red`)
+  keeps its serialized default (`0.05, 0.05, 0.05, 1`) — the attribute only
+  affects Inspector/batching behavior, not stored values.
+- **`Assets/Scripts/Build/BuildTile.cs`** — one addition, `public Renderer
+  GhostRenderer => ghostRenderer;`, exposing the previously fully-private
+  ghost `MeshRenderer` reference.
+- **`Assets/Scripts/PlayerInteraction.cs`** — the bulk of the work:
+  `CrosshairState` enum, `EvaluateFeedback()` (called from `Update()` right
+  where the old `_isTargetingInteractable` bool used to be computed — replaced
+  it entirely, nothing else referenced that field), `ApplyGhostTint`/
+  `ClearGhostTint`/`ApplyOutlineHighlight`/`ClearOutlineHighlight` (all reuse
+  one `MaterialPropertyBlock` allocated once in `Awake`), `DrawCrosshair`/
+  `DrawDot`/`DrawRing` (replaces the old inline dot-draw in `OnGUI`). Cleanup
+  calls added to the existing `OnNetworkDespawn`.
+- New `[Header("Interaction Feedback")]` Inspector fields on `PlayerInteraction`
+  (`validGhostColor`, `invalidGhostColor`, `hoverOutlineColor`) so Cameron can
+  tune without touching code.
+- `docs/ARCHITECTURE.md` — new "Interaction feedback" subsection under
+  Interaction & Pickup, and a note on the Shaders section's `ToonLit.shader`
+  entry about the new `[PerRendererData]` attribute.
+
+### Verified by direct inspection (not by running the game)
+
+- Confirmed every pickup prefab (`WoodPlank`, `Concrete`, `Steel`, `Hammer`,
+  `Trowel`, `Welding Torch.prefab`) has the same root-object-with-`PhysicsPickup`
+  + child-`Cube`-with-`MeshRenderer` structure, so
+  `pickupTarget.GetComponentInChildren<Renderer>()` resolves correctly for all
+  of them with no per-prefab special-casing.
+- Confirmed `Wood.mat`/`Concrete.mat`/`Steel.mat`/`Torch.mat`/`Trowel.mat` all
+  reference `ToonLit.shader`'s guid directly (not `ToonTransparent.shader`),
+  so the outline pass — and the new `[PerRendererData]` override — actually
+  applies to them.
+- Confirmed `ToonTransparentGhost.mat` (the ghost material) uses
+  `ToonTransparent.shader`, which declares `_BaseColor` in its `CBUFFER`
+  exactly like `ToonLit.shader` does — the MPB override works on it with zero
+  shader changes, as assumed.
+- Confirmed `BuildTile.prefab` already has `ghostRenderer` wired
+  (`fileID: 2469553598397796856`).
+
+### Design question asked instead of assumed (per CLAUDE.md)
+
+The pasted spec's logic implied looking at an empty/destroyed tile with
+**empty hands** should render the ghost red ("invalid"), same as holding the
+*wrong* material — its pseudo-code only had one boolean (`valid`) covering
+both cases. That's a real feel decision, not just an implementation detail,
+so asked rather than assumed. **Cameron chose: neutral, not red.** Red is now
+reserved for an actual mismatch (holding a material that doesn't fit this
+specific tile); empty hands or holding a tool just leaves the ghost at its
+normal per-material hue and the crosshair at the existing yellow hover state.
+`EvaluateFeedback()` in `PlayerInteraction.cs` only sets `ghostTarget` (and
+therefore only calls `ApplyGhostTint`) when `_heldObject` resolves to a
+`MaterialItem` — empty-handed/tool-holding looks fall through to
+`CrosshairState.Hover` with no ghost tint override at all, so
+`RefreshVisual()`'s own hue tint shows through untouched.
+
+### Open items for Cameron to review
+
+- **Not compiled or run.** No Unity Editor or C# compiler in this environment
+  — please open the project and confirm it builds before relying on this.
+- Playtest: look at an empty/destroyed tile while holding the right material
+  (green ghost + green ring), the wrong material (red ghost), and nothing/a
+  tool (no tint — ghost shows its normal hue, yellow hover crosshair).
+  - **Not yet built** is the per-`MaterialType` *match between the held item
+    and that specific tile's `RequiredMaterial`* edge case where the player
+    holds `Any`-compatible material on an `Any`-required tile vs. a mismatched
+    one — `CanAcceptMaterial` already handles this correctly, just flagging
+    that the ghost color is only as fine-grained as that existing method.
+- Playtest: look at a `MaterialPlaced` tile holding the matching tool (white
+  dot + white ring, signaling "press/hold E"), wrong tool or no tool (yellow
+  hover, same as before this session).
+- Playtest: look at a loose tool/material on the ground — yellow outline
+  should appear on the mesh; pick it up and confirm the outline clears and
+  doesn't re-appear while held.
+- Playtest performance with several players/tiles/items in view at once — the
+  change-detection guards should mean this is cheap, but it's unverified at
+  runtime.
+- Colors (`validGhostColor`/`invalidGhostColor`/`hoverOutlineColor`) are first-pass
+  values, exposed in the Inspector specifically so Gilbert/Cameron can retune
+  without code changes — not an art decision on my part.
