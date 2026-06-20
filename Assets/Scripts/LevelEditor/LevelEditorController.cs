@@ -528,18 +528,6 @@ public class LevelEditorController : MonoBehaviour
     // Visuals -- placeholder primitives, no art assets required.
     // -------------------------------------------------------------------------
 
-    private static readonly Dictionary<TileType, Color> TileColors = new()
-    {
-        { TileType.Foundation, new Color(0.5f, 0.5f, 0.5f) },
-        { TileType.Floor,      new Color(0.6f, 0.4f, 0.2f) },
-        { TileType.Wall,       new Color(0.8f, 0.7f, 0.5f) },
-        { TileType.Window,     new Color(0.6f, 0.8f, 1f) },
-        { TileType.Door,       new Color(0.9f, 0.5f, 0.1f) },
-        { TileType.Column,     new Color(0.3f, 0.3f, 0.3f) },
-        { TileType.Furniture,  new Color(0.3f, 0.7f, 0.3f) },
-        { TileType.Decor,      new Color(0.6f, 0.3f, 0.7f) },
-    };
-
     /// <summary>Recomputes every Wall tile's connection mask from scratch against the
     /// current Blueprint (Smart Wall System, Section 10). Called before every
     /// RefreshAllTileVisuals() so CreateTileCube always has up-to-date rotation data to
@@ -619,7 +607,7 @@ public class LevelEditorController : MonoBehaviour
         if (isWall)
             go.transform.localEulerAngles = new Vector3(0f, wallVariant.yRotation, 0f);
 
-        Color color = TileColors.TryGetValue(BlueprintEnums.ParseTileType(tile.type), out Color c) ? c : Color.white;
+        Color color = TileTypeColors.ColorFor(BlueprintEnums.ParseTileType(tile.type));
         if (!onCurrentLayer) color = Color.Lerp(color, Color.black, 0.6f);
 
         go.GetComponent<MeshRenderer>().sharedMaterial = GetSharedMaterial(color);

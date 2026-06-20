@@ -11,45 +11,27 @@ This is the product backlog. When starting work on any feature here, move it to
 
 ## Hub Systems
 
-### Hub Terminal (Blueprint Selector)
+### Hub Terminal (Blueprint Selector) — BUILT, see `docs/ARCHITECTURE.md`
 
-**What it is:** A physical terminal object placed in the Hub world. Players walk up
-to it to browse and select which blueprint to play next. Replaces the current
-`LevelSelectKiosk` `OnGUI` numbered list with a proper world-space UI.
+Implemented as `HubTerminal` (`Assets/Scripts/Build/HubTerminal.cs`), placed in
+`Hub.unity` alongside (not replacing) `LevelSelectKiosk`. Full detail in
+`docs/ARCHITECTURE.md`'s "Hub Terminal" section. Summary of how the open questions
+above were resolved, asked directly to Cameron:
+- **Host selects vs. vote:** no host gate — any connected player's confirm writes
+  the synced selection, same any-player-confirms behavior `LevelSelectKiosk` already
+  had. No vote system.
+- **Browse vs. confirm:** anyone can browse/highlight anytime, independent of
+  confirmation; only confirming (Enter) is networked.
+- **Preview:** yes, a simple top-down tile-color preview (procedural `Texture2D`,
+  cropped to content, cached per blueprint).
 
-**Design intent:** The terminal should feel like a job board or mission terminal.
-Players gather around it together, one person (or the host) makes the selection, and
-everyone sees it update. It should be a natural social moment before heading to the
-`StartingAreaTrigger`.
+**Built-in deviation from this doc:** rendered via screen-space `OnGUI()`, not a
+world-space Canvas — this codebase has no EventSystem/PhysicsRaycaster anywhere for
+world-space UI raycasting, and every other in-game menu is already `OnGUI()`-based.
+Flagged in `docs/ARCHITECTURE.md` and `docs/SESSION.md` for Cameron to confirm this
+adaptation is acceptable.
 
-**Decisions made:**
-- Host selects, or players vote (TBD — vote system is more fun but more complex)
-- Selection broadcasts to all clients via `[Rpc(SendTo.Server)]`, same as
-  `LevelSelectKiosk`
-- Blueprint is identified by id string, not list index (list order isn't guaranteed
-  to match across machines since each client scans Steam Cloud independently)
-- `GameSession.SelectedBlueprintId` stores the result and is read by `BuildSystem`
-  when Game1 loads
-
-**What to build:**
-- World-space Canvas on a terminal/screen prop in Hub
-- Blueprint list panel: shows blueprint display name, tile count, material types
-  required, completion threshold
-- Selection confirmed by host (or via vote if vote system is implemented)
-- NetworkVariable to sync current selection display to all clients
-- Visual feedback when selection is confirmed (brief lock-in animation or color
-  change)
-
-**Dependencies:** `BlueprintLoader` (already exists), `GameSession` (already exists),
-`StartingAreaTrigger` (already exists, unchanged)
-
-**Replaces:** `LevelSelectKiosk` (`OnGUI` numbered list) — keep the old script as a
-fallback but the terminal is the intended path.
-
-**Open questions:**
-- Does the host select unilaterally or do players vote?
-- Should non-host players be able to browse but not confirm?
-- Does the terminal show a visual preview of the blueprint grid layout?
+`LevelSelectKiosk` is unchanged and still in the Hub as the documented fallback.
 
 ---
 

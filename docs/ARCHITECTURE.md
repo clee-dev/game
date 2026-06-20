@@ -734,6 +734,88 @@ review rather than silently treated as settled.
 
 ---
 
+### Hub Terminal
+
+`HubTerminal` (`Assets/Scripts/Build/HubTerminal.cs`) — the richer drop-in
+replacement for `LevelSelectKiosk`'s numbered pop-up called out in
+`PLANNED_FEATURES.md`. Same `NetworkVariable<FixedString64Bytes>`
+(Everyone-read / Server-write) selection sync and trailing "Enter Level
+Editor" row as `LevelSelectKiosk`, but each row also shows tile count /
+required materials / completion threshold (`DescribeDetails`), and the
+terminal renders a small procedurally-painted top-down preview texture per
+blueprint. `LevelSelectKiosk` is untouched and still in the Hub as the
+documented fallback; this is a second, independent fixture, not a
+replacement of the GameObject.
+
+**Resolved design decisions (asked Cameron directly):**
+- **Confirmation rights:** no host gate — any connected player's confirm
+  writes the synced selection, same as `LevelSelectKiosk`.
+- **Browsing:** anyone can browse/highlight rows anytime, independent of
+  who (if anyone) has confirmed a selection.
+- **Preview:** yes — simple top-down tile-color preview, see below.
+
+**Browse vs. confirm split.** To let "anyone can browse anytime" coexist
+with a single synced selection, `PlayerInteraction` keeps browsing
+client-local: number keys 1-9 move a local-only `_terminalHighlightedIndex`
+with no network traffic, and only `Enter` actually calls
+`HubTerminal.SelectBlueprintRpc`/`EnterLevelEditorRpc`. The menu stays open
+after confirming (rather than closing like `LevelSelectKiosk`'s does) so the
+lock-in flash means something — `HubTerminal.SelectionConfirmed` fires off
+`_selectedBlueprintId`'s `OnValueChanged`, and `PlayerInteraction` shows a
+green "Selection confirmed!" label for `TerminalFlashDuration` (1.5s).
+
+**Rendering: screen-space `OnGUI()`, not a world-space Canvas.**
+`PLANNED_FEATURES.md` describes this as a world-space terminal UI, but every
+existing in-game menu (`DrawKioskMenu`, `DrawOrderMenu`, the delivery queue,
+the crosshair) is immediate-mode `OnGUI()` — there is no
+EventSystem/PhysicsRaycaster anywhere in this codebase for world-space UI
+raycasting. Building that plumbing for one terminal would be a much bigger
+change than this feature calls for, so `HubTerminal` follows the established
+`OnGUI()` convention instead: `PlayerInteraction.DrawTerminalMenu()` draws
+the row list, per-row detail line, and the preview via `GUI.DrawTexture`,
+same screen-space-overlay style as every other menu. **This is a deviation
+from the written design doc** — flagged here and in `docs/SESSION.md` for
+Cameron to confirm it's an acceptable adaptation rather than a missed
+requirement.
+
+**Preview texture.** `HubTerminal.GetPreviewTexture(int)` /
+`BuildPreviewTexture` crops to the blueprint's actual tile (x, z) bounding
+box (not its nominal `gridSize` — existing blueprints all declare a 10x3x10
+grid but only occupy a handful of tiles, so cropping to content avoids a
+mostly-empty preview), flattens to the topmost tile per (x, z) column
+(`position.y` is a vertical layer index, not world height), and paints each
+column with the new shared `TileTypeColors.ColorFor(TileType)` lookup —
+extracted out of `LevelEditorController`'s formerly-private color dict so
+both the Level Editor's placeholder cubes and this preview use one source of
+truth. Capped at 48px per side (`PreviewMaxDimension`), `FilterMode.Point`,
+built once per blueprint id and cached in `_previewCache`, destroyed in
+`OnNetworkDespawn`.
+
+**Placed in-scene** at `(-1.159, 1.181, -15.311)` in `Hub.unity` — same
+general build/launch area as `LevelSelectKiosk` (`-1.159, 1.181, -19.311`)
+and `LevelEditorAccessPoint` (`2, 0.5, -22`), offset 4m along Z into open
+space confirmed clear of other objects, so it reads as "a second,
+more discoverable terminal" rather than crowding either existing fixture. A
+plain `Cube` mesh tinted with `Blue.mat`, distinct from `LevelSelectKiosk`'s
+yellow `Cylinder`. Same `NetworkObject`/`BoxCollider` shape as
+`LevelSelectKiosk` (`Ownership: 1`, non-trigger `BoxCollider` sized
+`1 x 2.05 x 1` for `PlayerInteraction`'s raycast to hit).
+
+**Unverified — no Unity Editor or C# compiler available this session.**
+`HubTerminal.cs`/`TileTypeColors.cs` and their `.meta` files, the
+`PlayerInteraction.cs` menu/input plumbing, and the new `HubTerminal`
+GameObject in `Hub.unity` (hand-authored Force-Text YAML, fresh fileIDs in
+the `5400000` range and a fresh `GlobalObjectIdHash`, checked for zero
+collisions against the rest of the file, added to `SceneRoots.m_Roots`)
+were all hand-verified by direct read only. Please open `Hub.unity` once
+to confirm the GameObject and its hash survive an Editor save without
+Unity flagging a duplicate/invalid `GlobalObjectIdHash`, then playtest:
+open the terminal, browse with number keys, confirm with Enter, and check
+the preview renders recognizable colors for a blueprint with more than one
+tile type.
+
+---
+
 ### Level Editor
 
 Location: `Assets/Scripts/LevelEditor/` (deliberately NOT in `Editor/` — survives
@@ -989,7 +1071,6 @@ Designed but not yet in code:
 - Weight classes / movement speed penalties for carried objects
 - Two-player shared carry for heavy items
 - Concrete (cement + water, hardening timer) and Steel materials/tools
-- Structural integrity / collapse cascade
 - Contracts, timer, win/loss, payout
 - Economy (shared money pool, company fee) and shop
 - Chaos event framework and any individual event
