@@ -31,7 +31,10 @@ Shader "Custom/ToonLit"
         _RimStrength    ("Rim Strength",    Range(0, 1))    = 0.35
 
         [Header(Outline)]
-        _OutlineColor   ("Outline Color",   Color)          = (0.05, 0.05, 0.05, 1)
+        // PerRendererData -- lets PlayerInteraction override this per-instance via
+        // MaterialPropertyBlock (hover highlight on loose pickups) without breaking
+        // SRP Batcher compatibility for everything else using this shader.
+        [PerRendererData] _OutlineColor ("Outline Color", Color) = (0.05, 0.05, 0.05, 1)
         _OutlineWidth   ("Outline Width",   Range(0, 0.1))  = 0.025
     }
 

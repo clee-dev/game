@@ -30,14 +30,25 @@ public class PlayerInteraction : NetworkBehaviour
     [SerializeField] private float interactRange = 2.5f;
     [SerializeField] private float throwForce    = 8f;
 
+    [Header("Interaction Feedback")]
+    [SerializeField] private Color validGhostColor   = new(0.2f, 1f,   0.3f, 0.55f);
+    [SerializeField] private Color invalidGhostColor = new(1f,   0.2f, 0.2f, 0.30f);
+    [SerializeField] private Color hoverOutlineColor = new(1f,   0.9f, 0.2f, 1f);
+
     private InputReader      _input;
     private PhysicsPickup    _heldObject;
     private OrderStation     _openOrderMenuTarget;
     private LevelSelectKiosk _openKioskMenuTarget;
 
+    // Reused every frame for MaterialPropertyBlock writes -- never allocate one in Update.
+    private MaterialPropertyBlock _mpb;
+    private BuildTile             _lastGhostTarget;
+    private Renderer              _lastOutlineTarget;
+
     private void Awake()
     {
         _input = GetComponent<InputReader>();
+        _mpb = new MaterialPropertyBlock();
     }
 
     private void Update()
@@ -56,7 +67,7 @@ public class PlayerInteraction : NetworkBehaviour
         LevelSelectKiosk kioskTarget  = hitCollider != null ? hitCollider.GetComponentInParent<LevelSelectKiosk>() : null;
         TrashBin         trashTarget  = hitCollider != null ? hitCollider.GetComponentInParent<TrashBin>()         : null;
         LevelEditorAccessPoint editorAccessTarget = hitCollider != null ? hitCollider.GetComponentInParent<LevelEditorAccessPoint>() : null;
-        _isTargetingInteractable = tileTarget != null || pickupTarget != null || orderTarget != null || kioskTarget != null || trashTarget != null || editorAccessTarget != null;
+        EvaluateFeedback(tileTarget, pickupTarget, orderTarget, kioskTarget, trashTarget, editorAccessTarget);
 
         _debugDemolishTarget = IsServer && tileTarget != null &&
             (tileTarget.State == TileState.MaterialPlaced || tileTarget.State == TileState.Built)
@@ -90,6 +101,116 @@ public class PlayerInteraction : NetworkBehaviour
         if (!(Keyboard.current?.backspaceKey.wasPressedThisFrame ?? false)) return;
 
         _debugDemolishTarget.Collapse();
+    }
+
+    // -------------------------------------------------------------------------
+    // Interaction feedback -- crosshair state, ghost tint on targeted build
+    // tiles, and outline highlight on targeted loose pickups. Driven entirely
+    // by the raycast targets Update() already computes; no separate raycast.
+    // -------------------------------------------------------------------------
+
+    private enum CrosshairState { Default, Hover, PlaceValid, PlaceInvalid, Build }
+
+    private CrosshairState _crosshairState = CrosshairState.Default;
+
+    private void EvaluateFeedback(BuildTile tileTarget, PhysicsPickup pickupTarget,
+        OrderStation orderTarget, LevelSelectKiosk kioskTarget, TrashBin trashTarget, LevelEditorAccessPoint editorAccessTarget)
+    {
+        CrosshairState newState = CrosshairState.Default;
+        BuildTile ghostTarget = null;
+        Renderer outlineTarget = null;
+
+        if (tileTarget != null && (tileTarget.State == TileState.Empty || tileTarget.State == TileState.Destroyed))
+        {
+            // Repairable Destroyed tiles take a fresh material exactly like Empty ones --
+            // CanAcceptMaterial already encodes that, so no separate check is needed here.
+            var material = _heldObject != null ? _heldObject.GetComponent<MaterialItem>() : null;
+            if (material != null)
+            {
+                // Red is reserved for an actual mismatch -- empty hands (or holding a
+                // tool, which doesn't apply here) leaves the ghost at its normal hue
+                // instead of flagging every empty tile red by default.
+                newState = tileTarget.CanAcceptMaterial(material.Type) ? CrosshairState.PlaceValid : CrosshairState.PlaceInvalid;
+                ghostTarget = tileTarget;
+            }
+            else
+            {
+                newState = CrosshairState.Hover;
+            }
+        }
+        else if (tileTarget != null && tileTarget.State == TileState.MaterialPlaced)
+        {
+            var tool = _heldObject != null ? _heldObject.GetComponent<ToolItem>() : null;
+            // The hold-to-build progress bar communicates this state once building starts;
+            // the crosshair just needs to signal "yes, you can start" beforehand.
+            newState = tool != null && tileTarget.CanBuild(tool.Type) ? CrosshairState.Build : CrosshairState.Hover;
+        }
+        else if (pickupTarget != null && !pickupTarget.IsHeld)
+        {
+            newState = CrosshairState.Hover;
+            outlineTarget = pickupTarget.GetComponentInChildren<Renderer>();
+        }
+        else if (tileTarget != null || orderTarget != null || kioskTarget != null || trashTarget != null || editorAccessTarget != null)
+        {
+            newState = CrosshairState.Hover;
+        }
+
+        if (ghostTarget != _lastGhostTarget)
+        {
+            ClearGhostTint();
+            if (ghostTarget != null)
+                ApplyGhostTint(ghostTarget, newState == CrosshairState.PlaceValid);
+        }
+
+        if (outlineTarget != _lastOutlineTarget)
+        {
+            ClearOutlineHighlight();
+            if (outlineTarget != null)
+                ApplyOutlineHighlight(outlineTarget);
+        }
+
+        _crosshairState = newState;
+    }
+
+    private void ApplyGhostTint(BuildTile tile, bool valid)
+    {
+        if (tile.GhostRenderer == null) return;
+
+        _mpb.Clear();
+        _mpb.SetColor("_BaseColor", valid ? validGhostColor : invalidGhostColor);
+        tile.GhostRenderer.SetPropertyBlock(_mpb);
+        _lastGhostTarget = tile;
+    }
+
+    private void ClearGhostTint()
+    {
+        if (_lastGhostTarget == null) return;
+
+        if (_lastGhostTarget.GhostRenderer != null)
+        {
+            _mpb.Clear();
+            _lastGhostTarget.GhostRenderer.SetPropertyBlock(_mpb);
+        }
+        _lastGhostTarget = null;
+    }
+
+    private void ApplyOutlineHighlight(Renderer r)
+    {
+        if (r == null) return;
+
+        _mpb.Clear();
+        _mpb.SetColor("_OutlineColor", hoverOutlineColor);
+        r.SetPropertyBlock(_mpb);
+        _lastOutlineTarget = r;
+    }
+
+    private void ClearOutlineHighlight()
+    {
+        if (_lastOutlineTarget == null) return;
+
+        _mpb.Clear();
+        _lastOutlineTarget.SetPropertyBlock(_mpb);
+        _lastOutlineTarget = null;
     }
 
     // -------------------------------------------------------------------------
@@ -380,30 +501,73 @@ public class PlayerInteraction : NetworkBehaviour
     }
 
     // -------------------------------------------------------------------------
-    // Crosshair -- a centered dot so the player can tell exactly what the
-    // raycast is aimed at when targets are close together. Drawn directly via
+    // Crosshair -- a centered dot (plus a ring for context states) so the
+    // player can tell exactly what the raycast is aimed at, and whether the
+    // current action would succeed, before pressing E. Drawn directly via
     // OnGUI so it needs no Canvas/Image setup in the scene or prefab.
     // -------------------------------------------------------------------------
 
     private const float CrosshairSize = 6f;
-
-    private bool _isTargetingInteractable;
+    private const float RingRadius    = 10f;
+    private const float RingThickness = 2f;
 
     private void OnGUI()
     {
         if (!IsOwner) return;
 
-        GUI.color = _isTargetingInteractable ? Color.yellow : Color.white;
-        GUI.DrawTexture(new Rect(
-            Screen.width  * 0.5f - CrosshairSize * 0.5f,
-            Screen.height * 0.5f - CrosshairSize * 0.5f,
-            CrosshairSize, CrosshairSize), Texture2D.whiteTexture);
-        GUI.color = Color.white;
-
+        DrawCrosshair();
         DrawOrderQueue();
         DrawOrderMenu();
         DrawKioskMenu();
         DrawDebugDemolishHint();
+    }
+
+    private void DrawCrosshair()
+    {
+        Vector2 center = new(Screen.width * 0.5f, Screen.height * 0.5f);
+
+        switch (_crosshairState)
+        {
+            case CrosshairState.Hover:
+                DrawDot(center, Color.yellow);
+                DrawRing(center, Color.yellow);
+                break;
+            case CrosshairState.PlaceValid:
+                DrawDot(center, Color.green);
+                DrawRing(center, Color.green);
+                break;
+            case CrosshairState.PlaceInvalid:
+                DrawDot(center, Color.red);
+                break;
+            case CrosshairState.Build:
+                DrawDot(center, Color.white);
+                DrawRing(center, Color.white);
+                break;
+            default:
+                DrawDot(center, Color.white);
+                break;
+        }
+    }
+
+    private static void DrawDot(Vector2 center, Color color)
+    {
+        GUI.color = color;
+        GUI.DrawTexture(new Rect(
+            center.x - CrosshairSize * 0.5f, center.y - CrosshairSize * 0.5f,
+            CrosshairSize, CrosshairSize), Texture2D.whiteTexture);
+        GUI.color = Color.white;
+    }
+
+    // Hollow square ring (four thin bars) -- reuses the same built-in white texture
+    // as DrawDot, no extra texture asset or Awake-time allocation needed.
+    private static void DrawRing(Vector2 center, Color color)
+    {
+        GUI.color = color;
+        GUI.DrawTexture(new Rect(center.x - RingRadius, center.y - RingRadius, RingRadius * 2f, RingThickness), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(center.x - RingRadius, center.y + RingRadius - RingThickness, RingRadius * 2f, RingThickness), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(center.x - RingRadius, center.y - RingRadius, RingThickness, RingRadius * 2f), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(center.x + RingRadius - RingThickness, center.y - RingRadius, RingThickness, RingRadius * 2f), Texture2D.whiteTexture);
+        GUI.color = Color.white;
     }
 
     private void DrawDebugDemolishHint()
@@ -513,5 +677,8 @@ public class PlayerInteraction : NetworkBehaviour
         // If this player disconnects while holding something, drop it cleanly
         if (_heldObject != null && IsServer)
             _heldObject.RequestDropServerRpc(Vector3.zero);
+
+        ClearGhostTint();
+        ClearOutlineHighlight();
     }
 }

@@ -192,6 +192,40 @@ Handles: pickup, place-material, hold-to-build, drop/throw. Renders crosshair,
 order menu, kiosk menu, incoming-deliveries queue via `OnGUI` (no Canvas/uGUI
 required).
 
+**Interaction feedback (2026-06-20) — `EvaluateFeedback()`, called once per
+frame from the existing raycast block, reusing the same `tileTarget`/
+`pickupTarget` the rest of `Update()` already derived (no second raycast).**
+Drives two layers, both keyed off a single `CrosshairState` enum (`Default /
+Hover / PlaceValid / PlaceInvalid / Build`):
+- **Crosshair (`OnGUI`/`DrawCrosshair`)** — the existing centered dot now
+  changes color per state (white/yellow/green/red), plus a thin square ring
+  around it for `Hover`/`PlaceValid`/`Build` (`DrawRing`, four `GUI.DrawTexture`
+  bars, reuses `Texture2D.whiteTexture`, no new texture asset).
+- **Ghost tint on targeted `BuildTile`s** — `ApplyGhostTint`/`ClearGhostTint`
+  write `_BaseColor` on `BuildTile.GhostRenderer` (new public accessor for the
+  previously-private `ghostRenderer`) via a single reused `MaterialPropertyBlock`,
+  green when the held `MaterialItem` matches `CanAcceptMaterial`, red otherwise.
+  Only applies while the tile is `Empty` or `Destroyed` (the only states the
+  ghost renderer is actually visible — see Build Tiles section). This layers on
+  top of `BuildTile.RefreshVisual()`'s own per-material hue tint (`.material.color`,
+  not MPB) rather than replacing it: the MPB override takes priority while
+  targeted, then reverts to the hue tint the instant the target changes, since
+  `RefreshVisual` never touches the property block.
+- **Outline highlight on targeted loose `PhysicsPickup`s** — same
+  `MaterialPropertyBlock` pattern, writes `_OutlineColor` (now `[PerRendererData]`
+  in `ToonLit.shader` — see Shaders section) on `pickupTarget.GetComponentInChildren<Renderer>()`,
+  only while `!pickupTarget.IsHeld`. Every tool/material prefab (`WoodPlank`,
+  `Concrete`, `Steel`, `Hammer`, `Trowel`, `Welding Torch`) follows the same
+  `Cube` child + `MeshRenderer` structure, so this needs no prefab-specific casing.
+- Change-detection (`if (target != _lastTarget)`) on both layers means
+  `SetPropertyBlock` only fires when the actual target changes, not every
+  frame. Cleared in `OnNetworkDespawn` for the disconnect case; tile/pickup
+  destruction mid-target is handled by the existing `!= null` guards (Unity's
+  overloaded equality treats a destroyed object reference as `null`).
+- **Not built:** a literal "press E" ring texture or shape system beyond the
+  bars described above — kept to what `OnGUI`'s existing immediate-mode style
+  already does, no new Canvas/Image/texture asset added.
+
 ---
 
 ### Materials
@@ -727,7 +761,12 @@ in-gameplay pause overlay, see "Pause Menu" below).
 ### Shaders
 
 `ToonLit.shader` — two-pass URP cel shader. Pass 1: inverse hull outline (back
-faces). Pass 2: cel shading (smoothstep NdotL) + rim light.
+faces). Pass 2: cel shading (smoothstep NdotL) + rim light. `_OutlineColor` is
+now `[PerRendererData]` (2026-06-20) so `PlayerInteraction` can override it
+per-instance via `MaterialPropertyBlock` for the pickup hover highlight without
+breaking SRP Batcher compatibility for every other material on this shader —
+the attribute only changes how the Inspector/batcher treat the property, every
+existing material's serialized default (`0.05, 0.05, 0.05, 1`) is untouched.
 
 `ToonEmissive.shader` — extends ToonLit. HDR emission channel added to fragment
 output after lighting. `_EmissionMap` defaults to `"white"` — emission color comes

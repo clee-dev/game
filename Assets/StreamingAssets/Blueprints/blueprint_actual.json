@@ -1,6 +1,6 @@
 {
-  "id": "blueprint_new",
-  "name": "New Blueprint",
+  "id": "blueprint_actual",
+  "name": "cascade test",
   "description": "",
   "scenery": "forest",
   "gridSize": {
