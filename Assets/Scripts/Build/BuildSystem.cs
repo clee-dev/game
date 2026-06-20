@@ -181,6 +181,38 @@ public class BuildSystem : MonoBehaviour
     }
 
     // -------------------------------------------------------------------------
+    // Structural collapse cascade (Section 4.4 -- "Jenga-style collapse"). Server-only,
+    // called from BuildTile.OnStateChanged when a tile becomes Destroyed.
+    //
+    // Deliberately reuses TileStructuralRules.HasSupport (via IsEligible) instead of
+    // maintaining a separate precomputed supportDependents graph: HasSupport already
+    // re-derives "is this position currently supported" live from neighbor tile
+    // states, so a cached reverse-edge graph would just be a second copy of the same
+    // information with its own staleness risk. Only the up and 4 horizontal neighbors
+    // are checked -- those are the only positions TileStructuralRules lets anything
+    // depend on (support never flows downward, so "down" is never re-checked here).
+    // Each collapse re-enters this method through OnStateChanged, so the cascade
+    // continues automatically without explicit recursion bookkeeping.
+    // -------------------------------------------------------------------------
+
+    public void CascadeCollapseFrom(Vector3Int pos)
+    {
+        CollapseIfUnsupported(pos + Vector3Int.up);
+        foreach (var dir in TileStructuralRules.HorizontalNeighbors)
+            CollapseIfUnsupported(pos + dir);
+    }
+
+    private void CollapseIfUnsupported(Vector3Int pos)
+    {
+        BuildTile tile = GetLiveTileAt(pos);
+        if (tile == null) return;
+        if (tile.State != TileState.MaterialPlaced && tile.State != TileState.Built) return;
+        if (IsEligible(tile)) return; // still supported by something else
+
+        tile.Collapse();
+    }
+
+    // -------------------------------------------------------------------------
     // Completion tracking (Section 9.4)
     // -------------------------------------------------------------------------
 

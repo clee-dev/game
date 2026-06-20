@@ -32,6 +32,7 @@ public class BuildTile : NetworkBehaviour
     [Header("Per-material hue -- ghost shows the raw hue, Placed/Built lerp toward blue/green")]
     [SerializeField] [Range(0f, 1f)] private float placedBlueBlend = 0.5f;
     [SerializeField] [Range(0f, 1f)] private float builtGreenBlend = 0.5f;
+    [SerializeField] [Range(0f, 1f)] private float destroyedRedBlend = 0.6f;
 
     // Cached MeshRenderers on placedMaterialVisual/builtVisual -- both GameObjects carry a
     // MeshRenderer directly on their own root, so no extra Inspector fields are needed.
@@ -111,6 +112,14 @@ public class BuildTile : NetworkBehaviour
             BuildSystem.Instance.RefreshNeighborsOf(GridPosition);
             BuildSystem.Instance.EvaluateCompletion();
         }
+        else if (now == TileState.Destroyed && IsServer)
+        {
+            // Server-only: re-derives support for whatever this tile was holding up and
+            // collapses it too if nothing else is supporting it. Runs once per machine via
+            // the IsServer guard -- _state replicates everywhere, but only the server may
+            // write the NetworkVariables a further collapse would touch.
+            BuildSystem.Instance.CascadeCollapseFrom(GridPosition);
+        }
     }
 
     public void RefreshEligibility() => RefreshVisual();
@@ -144,9 +153,11 @@ public class BuildTile : NetworkBehaviour
 
         if (ghostRenderer != null)
         {
-            ghostRenderer.enabled = _state.Value == TileState.Empty;
+            bool isDestroyed = _state.Value == TileState.Destroyed;
+            ghostRenderer.enabled = _state.Value == TileState.Empty || isDestroyed;
             float alpha = eligible ? eligibleColor.a : ineligibleColor.a;
-            ghostRenderer.material.color = new Color(hue.r, hue.g, hue.b, alpha);
+            Color tint = isDestroyed ? Color.Lerp(hue, Color.red, destroyedRedBlend) : hue;
+            ghostRenderer.material.color = new Color(tint.r, tint.g, tint.b, alpha);
         }
 
         if (placedMaterialVisual != null)
@@ -191,8 +202,10 @@ public class BuildTile : NetworkBehaviour
     // Place material (Section 6.2, step 2)
     // -------------------------------------------------------------------------
 
+    // Destroyed is repairable -- it accepts a fresh material placement exactly like
+    // Empty, provided whatever was supporting this tile is still standing.
     public bool CanAcceptMaterial(MaterialType material) =>
-        _state.Value == TileState.Empty
+        (_state.Value == TileState.Empty || _state.Value == TileState.Destroyed)
         && BuildSystem.Instance.IsEligible(this)
         && (RequiredMaterial == MaterialType.Any || RequiredMaterial == material);
 
@@ -280,5 +293,36 @@ public class BuildTile : NetworkBehaviour
         _buildingClientId.Value = NoBuilder;
         _buildCoroutine = null;
         _state.Value = TileState.Built;
+    }
+
+    // -------------------------------------------------------------------------
+    // Structural collapse (Section 4.4 / 6.3) -- server-only, called by
+    // BuildSystem.CascadeCollapseFrom (dependents that lost support) and by the
+    // debug demolish trigger in PlayerInteraction (stand-in for chaos events,
+    // which are the eventual real trigger -- see PLANNED_FEATURES.md Phase D).
+    // -------------------------------------------------------------------------
+
+    public void Collapse()
+    {
+        if (_state.Value == TileState.Destroyed) return;
+
+        if (_buildCoroutine != null)
+        {
+            StopCoroutine(_buildCoroutine);
+            _buildCoroutine = null;
+        }
+
+        // A Built tile's material was already despawned by ConsumeAsBuilt; a
+        // MaterialPlaced tile still has its raw material sitting on it -- that goes
+        // down with the tile instead of being left floating with nothing under it.
+        if (_placedMaterial != null)
+        {
+            _placedMaterial.GetComponent<MaterialItem>()?.DestroyInCollapse();
+            _placedMaterial = null;
+        }
+
+        _buildProgress.Value = 0f;
+        _buildingClientId.Value = NoBuilder;
+        _state.Value = TileState.Destroyed;
     }
 }

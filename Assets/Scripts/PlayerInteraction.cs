@@ -57,6 +57,10 @@ public class PlayerInteraction : NetworkBehaviour
         LevelEditorAccessPoint editorAccessTarget = hitCollider != null ? hitCollider.GetComponentInParent<LevelEditorAccessPoint>() : null;
         _isTargetingInteractable = tileTarget != null || pickupTarget != null || orderTarget != null || kioskTarget != null || editorAccessTarget != null;
 
+        _debugDemolishTarget = IsServer && tileTarget != null &&
+            (tileTarget.State == TileState.MaterialPlaced || tileTarget.State == TileState.Built)
+                ? tileTarget : null;
+
         if (_openOrderMenuTarget != null && _openOrderMenuTarget != orderTarget)
             CloseOrderMenu();
         if (_openKioskMenuTarget != null && _openKioskMenuTarget != kioskTarget)
@@ -64,9 +68,27 @@ public class PlayerInteraction : NetworkBehaviour
 
         UpdatePrompt(tileTarget, orderTarget, kioskTarget, editorAccessTarget);
         HandleContinuousBuild(tileTarget);
+        HandleDebugDemolish();
         HandleInteractPress(tileTarget, pickupTarget, orderTarget, kioskTarget, editorAccessTarget);
         HandleOrderMenuSelection();
         HandleKioskMenuSelection();
+    }
+
+    // -------------------------------------------------------------------------
+    // Debug: host-only manual tile demolish. Stand-in for the chaos event
+    // framework (PLANNED_FEATURES.md Phase D), which doesn't exist yet and is
+    // the eventual real trigger for BuildTile.Collapse(). Remove this once
+    // Termites or another structural chaos event can drive it instead.
+    // -------------------------------------------------------------------------
+
+    private BuildTile _debugDemolishTarget;
+
+    private void HandleDebugDemolish()
+    {
+        if (_debugDemolishTarget == null) return;
+        if (!(Keyboard.current?.backspaceKey.wasPressedThisFrame ?? false)) return;
+
+        _debugDemolishTarget.Collapse();
     }
 
     // -------------------------------------------------------------------------
@@ -359,6 +381,15 @@ public class PlayerInteraction : NetworkBehaviour
         DrawOrderQueue();
         DrawOrderMenu();
         DrawKioskMenu();
+        DrawDebugDemolishHint();
+    }
+
+    private void DrawDebugDemolishHint()
+    {
+        if (_debugDemolishTarget == null) return;
+
+        GUI.Label(new Rect(10f, Screen.height - 30f, 460f, 24f),
+            "[Backspace] Debug: demolish targeted tile (host only, stand-in for chaos events)");
     }
 
     // -------------------------------------------------------------------------
