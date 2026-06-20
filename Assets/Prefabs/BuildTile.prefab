@@ -767,5 +767,9 @@ MonoBehaviour:
   builtVisual: {fileID: 7415062039063251896}
   eligibleColor: {r: 1, g: 1, b: 1, a: 0.5}
   ineligibleColor: {r: 1, g: 1, b: 1, a: 0.15}
+  placedBlueBlend: 0.5
+  builtGreenBlend: 0.5
+  destroyedRedBlend: 0.6
+  wallMeshSet: {fileID: 11400000, guid: 13e547d4891501c4b8f7bb92a8a57184, type: 2}
   progressBarRoot: {fileID: 5663109065309242041}
   progressFill: {fileID: 8762307532621990500}

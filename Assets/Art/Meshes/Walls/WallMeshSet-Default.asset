@@ -1,0 +1,20 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f1e556c4703c4cd9918ffb7b74b1e3fd, type: 3}
+  m_Name: WallMeshSet-Default
+  m_EditorClassIdentifier: Assembly-CSharp::WallMeshSet
+  standaloneMesh: {fileID: -1222502973562674349, guid: f4f16a9bdb504014dac74a0c90ef25ec, type: 3}
+  endCapMesh: {fileID: -8462722074795160706, guid: 7302deb6eac64d3439c4bc330e472723, type: 3}
+  straightMesh: {fileID: -6281424698479989189, guid: 8080220e216aafc4498e9fd8a0c09dc5, type: 3}
+  cornerMesh: {fileID: 2915442543378831615, guid: 178d7ec46001a7c4fa7335f184b7e3c0, type: 3}
+  tJunctionMesh: {fileID: -6281424698479989189, guid: 97c7b03b0d7681a4892115443eb37361, type: 3}
+  crossMesh: {fileID: -4304378537825741212, guid: 77e84b3a9f1449842a1b6353474e2455, type: 3}
