@@ -65,8 +65,9 @@ public class PlayerInteraction : NetworkBehaviour
         PhysicsPickup    pickupTarget = hitCollider != null ? hitCollider.GetComponentInParent<PhysicsPickup>()    : null;
         OrderStation     orderTarget  = hitCollider != null ? hitCollider.GetComponentInParent<OrderStation>()     : null;
         LevelSelectKiosk kioskTarget  = hitCollider != null ? hitCollider.GetComponentInParent<LevelSelectKiosk>() : null;
+        TrashBin         trashTarget  = hitCollider != null ? hitCollider.GetComponentInParent<TrashBin>()         : null;
         LevelEditorAccessPoint editorAccessTarget = hitCollider != null ? hitCollider.GetComponentInParent<LevelEditorAccessPoint>() : null;
-        EvaluateFeedback(tileTarget, pickupTarget, orderTarget, kioskTarget, editorAccessTarget);
+        EvaluateFeedback(tileTarget, pickupTarget, orderTarget, kioskTarget, trashTarget, editorAccessTarget);
 
         _debugDemolishTarget = IsServer && tileTarget != null &&
             (tileTarget.State == TileState.MaterialPlaced || tileTarget.State == TileState.Built)
@@ -77,10 +78,10 @@ public class PlayerInteraction : NetworkBehaviour
         if (_openKioskMenuTarget != null && _openKioskMenuTarget != kioskTarget)
             CloseKioskMenu();
 
-        UpdatePrompt(tileTarget, orderTarget, kioskTarget, editorAccessTarget);
+        UpdatePrompt(tileTarget, orderTarget, kioskTarget, trashTarget, editorAccessTarget);
         HandleContinuousBuild(tileTarget);
         HandleDebugDemolish();
-        HandleInteractPress(tileTarget, pickupTarget, orderTarget, kioskTarget, editorAccessTarget);
+        HandleInteractPress(tileTarget, pickupTarget, orderTarget, kioskTarget, trashTarget, editorAccessTarget);
         HandleOrderMenuSelection();
         HandleKioskMenuSelection();
     }
@@ -113,7 +114,7 @@ public class PlayerInteraction : NetworkBehaviour
     private CrosshairState _crosshairState = CrosshairState.Default;
 
     private void EvaluateFeedback(BuildTile tileTarget, PhysicsPickup pickupTarget,
-        OrderStation orderTarget, LevelSelectKiosk kioskTarget, LevelEditorAccessPoint editorAccessTarget)
+        OrderStation orderTarget, LevelSelectKiosk kioskTarget, TrashBin trashTarget, LevelEditorAccessPoint editorAccessTarget)
     {
         CrosshairState newState = CrosshairState.Default;
         BuildTile ghostTarget = null;
@@ -149,7 +150,7 @@ public class PlayerInteraction : NetworkBehaviour
             newState = CrosshairState.Hover;
             outlineTarget = pickupTarget.GetComponentInChildren<Renderer>();
         }
-        else if (tileTarget != null || orderTarget != null || kioskTarget != null || editorAccessTarget != null)
+        else if (tileTarget != null || orderTarget != null || kioskTarget != null || trashTarget != null || editorAccessTarget != null)
         {
             newState = CrosshairState.Hover;
         }
@@ -243,7 +244,7 @@ public class PlayerInteraction : NetworkBehaviour
     // Single press: pick up / place / drop
     // -------------------------------------------------------------------------
 
-    private void HandleInteractPress(BuildTile tileTarget, PhysicsPickup pickupTarget, OrderStation orderTarget, LevelSelectKiosk kioskTarget, LevelEditorAccessPoint editorAccessTarget)
+    private void HandleInteractPress(BuildTile tileTarget, PhysicsPickup pickupTarget, OrderStation orderTarget, LevelSelectKiosk kioskTarget, TrashBin trashTarget, LevelEditorAccessPoint editorAccessTarget)
     {
         if (!_input.InteractPressed) return;
         _input.ConsumeInteract();
@@ -269,6 +270,12 @@ public class PlayerInteraction : NetworkBehaviour
                 CloseOrderMenu(); // pressing E again closes the menu
             else if (!orderTarget.WouldExceedCap)
                 OpenOrderMenu(orderTarget);
+            return;
+        }
+
+        if (trashTarget != null)
+        {
+            if (_heldObject != null) TrashHeldItem(trashTarget);
             return;
         }
 
@@ -318,6 +325,15 @@ public class PlayerInteraction : NetworkBehaviour
         Vector3 throwVelocity = playerCamera.transform.forward * throwForce;
 
         _heldObject.RequestDropServerRpc(throwVelocity);
+        _heldObject = null;
+    }
+
+    /// <summary>Permanently deletes whatever's currently held -- recovery valve for an
+    /// ordering mistake, so a bad order doesn't have to keep eating a material cap slot
+    /// or get thrown somewhere out of the way instead.</summary>
+    private void TrashHeldItem(TrashBin bin)
+    {
+        bin.TrashItemRpc(_heldObject.NetworkObject);
         _heldObject = null;
     }
 
@@ -430,7 +446,7 @@ public class PlayerInteraction : NetworkBehaviour
     // Prompt
     // -------------------------------------------------------------------------
 
-    private void UpdatePrompt(BuildTile target, OrderStation orderTarget, LevelSelectKiosk kioskTarget, LevelEditorAccessPoint editorAccessTarget)
+    private void UpdatePrompt(BuildTile target, OrderStation orderTarget, LevelSelectKiosk kioskTarget, TrashBin trashTarget, LevelEditorAccessPoint editorAccessTarget)
     {
         if (interactPrompt == null) return;
 
@@ -455,6 +471,12 @@ public class PlayerInteraction : NetworkBehaviour
                 : orderTarget.WouldExceedCap
                     ? "Material cap reached"
                     : "[E] Order Materials";
+            return;
+        }
+
+        if (trashTarget != null)
+        {
+            interactPrompt.text = _heldObject != null ? "[E] Trash Held Item" : "Trash Bin";
             return;
         }
 

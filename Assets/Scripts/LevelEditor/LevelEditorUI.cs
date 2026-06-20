@@ -153,7 +153,7 @@ public class LevelEditorUI : MonoBehaviour
 
     private void DrawWorldObjectPanel()
     {
-        var rect = TrackArea(new Rect(10, 50, 280, 280));
+        var rect = TrackArea(new Rect(10, 50, 280, 300));
         GUILayout.BeginArea(rect, GUI.skin.box);
 
         GUILayout.Label("World Objects", _boldLabel);
@@ -163,6 +163,7 @@ public class LevelEditorUI : MonoBehaviour
         GUILayout.Label($"Supply Zones: {controller.Blueprint.SupplyZones.Count}");
         GUILayout.Label($"Order Stations: {controller.Blueprint.OrderStations.Count}");
         GUILayout.Label($"Tool Depots: {controller.Blueprint.ToolDepots.Count}");
+        GUILayout.Label($"Trash Bins: {controller.Blueprint.TrashBins.Count}");
         GUILayout.Label($"Player Spawns: {controller.Blueprint.PlayerSpawns.Count}/4");
 
         GUILayout.Space(6);

@@ -62,6 +62,13 @@ public class ToolDepotData
 }
 
 [Serializable]
+public class TrashBinData
+{
+    public string id;
+    public WorldPosition worldPosition;
+}
+
+[Serializable]
 public class CompletionThresholds
 {
     public float full;
@@ -91,6 +98,7 @@ public class BlueprintData
     public SupplyZoneData[] supplyZones;
     public OrderStationData[] orderStations;
     public ToolDepotData[] toolDepots;
+    public TrashBinData[] trashBins;
     public WorldPosition[] playerSpawns;
 
     public ContractDefaults contractDefaults;

@@ -860,3 +860,113 @@ therefore only calls `ApplyGhostTint`) when `_heldObject` resolves to a
 - Colors (`validGhostColor`/`invalidGhostColor`/`hoverOutlineColor`) are first-pass
   values, exposed in the Inspector specifically so Gilbert/Cameron can retune
   without code changes — not an art decision on my part.
+
+---
+
+## 2026-06-20 (Part C)
+
+**Context from Cameron:** "the biggest issue now is that when you order items
+in the game, they spawn inside each other and always fly all over the place
+as a result. they need to spawn in a stack so they gracefully fall ontop of
+each other. also there needs to be a trash bin to delete resources in case
+tehre is a mess up in ordering. also if items clip through the world they
+need to be despawned automatically if they go below like -40 y becuase
+theyre just falling out of the world and to prevent softlocks." Three bugs/
+requests, all addressed this session. No Unity Editor or C# compiler
+available this session either — all changes hand-verified by direct read,
+**not compiled or opened in-Editor.**
+
+### Bug 1 — ordered items spawn inside each other and explode apart (fixed)
+
+Root cause: `OrderQueueSystem.Deliver()` spread a multi-item order out
+**horizontally** with a hardcoded `0.5f`-unit offset. `WoodPlank.prefab`'s
+root `BoxCollider` is `1x1x1` — twice that spacing — so every item after the
+first spawned overlapping the one before it, and the physics solver violently
+separated them on the first `FixedUpdate`. This is exactly the "spawn inside
+each other and fly all over the place" symptom.
+
+Fixed by stacking vertically instead: each item in an order spawns directly
+above the previous one, spaced by the prefab's actual
+`Collider.bounds.size.y` (read live, not a hardcoded constant — scales
+automatically to Concrete/Steel whenever those get real prefabs) plus a small
+`StackGap` (`0.05f`) so collider faces don't spawn flush against each other.
+Each item now drops a short distance onto the one below it and settles under
+gravity instead of exploding outward.
+
+### Request 2 — Trash Bin to delete resources on ordering mistakes (code done, prefab pending)
+
+New `TrashBin.cs`: `NetworkObject`, one RPC
+(`TrashItemRpc(NetworkObjectReference)`) that confirms the referenced object
+has a `PhysicsPickup` then despawns it — same trust model as
+`BuildTile.PlaceMaterialRpc` (`TryGet` → component check → act). Works on any
+held material or tool, not just materials, since tools are recoverable from
+depots anyway.
+
+Wired as a fifth `PlayerInteraction` raycast target (alongside
+`BuildTile`/`OrderStation`/etc.) — shows "[E] Trash Held Item" while holding
+something and looking at one, "Trash Bin" otherwise. Wired into the
+blueprint/Level Editor pipeline the same way as `SupplyZone`/`OrderStation`/
+`ToolDepot`: new `TrashBinData { id, worldPosition }` + `BlueprintData.trashBins`
+(null-guarded in `BuildSystem.SpawnFromBlueprint()` since it's a schema field
+no existing blueprint JSON has yet), new `WorldObjectCategory.TrashBin` in the
+Level Editor with full click-to-place/erase/undo support and a red marker
+color — `LevelEditorUI.cs` needed no new button code since the brush
+selector's `CycleEnum<T>` is already generic over any enum.
+
+**Caught and self-corrected mid-session:** initially hand-authored a
+`TrashBin.prefab` YAML file directly (the way I'd build any other asset), then
+ran `git log --diff-filter=A -- '*.prefab'` to sanity-check against precedent
+and found every prefab in this repo's history was authored by Cameron in the
+Unity Editor — never by me, including in any prior session. Reverted the
+hand-authored prefab and `DefaultNetworkPrefabs.asset` registration, and wrote
+`docs/wiring/trash-bin-prefab.md` instead, following the same
+Editor-wiring-deferred pattern as the existing
+`docs/wiring/trowel-and-torch-tool-prefabs.md`. **The prefab does not exist
+yet** — until Cameron builds it per that doc and assigns
+`BuildSystem.trashBinPrefab` in the `Game1` scene, the new `trashBins` loop
+spawns nothing (same as any other empty array).
+
+### Request 3 — despawn items that fall out of the world (fixed)
+
+Added a `fallDespawnY` field (default `-40f`) and an `Update()` check directly
+to `PhysicsPickup` (the shared base class for both `MaterialItem` and
+`ToolItem`), so anything that tunnels through thin/missing geometry gets
+despawned server-side instead of falling forever — previously a permanently
+lost material-cap slot, or a softlock if it was a tool. One shared
+implementation, no duplication between materials and tools.
+
+### Changes made this session
+
+- `Assets/Scripts/Build/OrderQueueSystem.cs` — `Deliver()` vertical stacking
+  fix (Bug 1).
+- `Assets/Scripts/PhysicsPickup.cs` — `fallDespawnY` safety net (Request 3).
+- `Assets/Scripts/Build/TrashBin.cs` — new (Request 2).
+- `Assets/Scripts/Blueprint/BlueprintData.cs`,
+  `Assets/Scripts/LevelEditor/EditableBlueprint.cs` — `TrashBinData`/
+  `trashBins` schema (Request 2).
+- `Assets/Scripts/LevelEditor/LevelEditorController.cs`,
+  `LevelEditorUI.cs` — `WorldObjectCategory.TrashBin` (Request 2).
+- `Assets/Scripts/Build/BuildSystem.cs` — `trashBinPrefab` field + null-guarded
+  spawn loop (Request 2).
+- `Assets/Scripts/PlayerInteraction.cs` — `TrashBin` raycast target, prompt,
+  interact handling (Request 2).
+- `docs/wiring/trash-bin-prefab.md` — new wiring doc for the deferred prefab
+  (Request 2).
+- `docs/ARCHITECTURE.md` — documented all three fixes (Networking Model,
+  Interaction & Pickup, Ordering System, Blueprint System, Level Editor
+  sections).
+
+### Open items for Cameron to review
+
+- **Not compiled or run.** No Unity Editor or C# compiler available this
+  session — please confirm the project builds.
+- Build `TrashBin.prefab` and finish the remaining wiring steps in
+  `docs/wiring/trash-bin-prefab.md` — this is the one piece of Request 2 that
+  genuinely cannot be done outside the Editor.
+- Playtest Bug 1: order several of the same material at once, confirm they
+  land in a clean stack instead of flying apart.
+- Playtest Request 2 (once the prefab exists): pick up a material or tool,
+  look at the trash bin, press E, confirm it's despawned and frees its
+  material-cap slot.
+- Playtest Request 3: throw an item off the edge of the level (or otherwise
+  get it below y = -40), confirm it despawns instead of falling forever.

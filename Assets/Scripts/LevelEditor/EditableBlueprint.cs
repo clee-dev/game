@@ -22,6 +22,7 @@ public class EditableBlueprint
     public readonly List<SupplyZoneData> SupplyZones = new();
     public readonly List<OrderStationData> OrderStations = new();
     public readonly List<ToolDepotData> ToolDepots = new();
+    public readonly List<TrashBinData> TrashBins = new();
     public readonly List<WorldPosition> PlayerSpawns = new();
 
     public int TimeLimitSeconds = 300;
@@ -34,11 +35,13 @@ public class EditableBlueprint
     private int _nextSupplyZoneNumber = 1;
     private int _nextOrderStationNumber = 1;
     private int _nextToolDepotNumber = 1;
+    private int _nextTrashBinNumber = 1;
 
     public string NextTileId() => $"tile_{_nextTileNumber++:D3}";
     public string NextSupplyZoneId() => $"supply_{_nextSupplyZoneNumber++:D3}";
     public string NextOrderStationId() => $"order_{_nextOrderStationNumber++:D3}";
     public string NextToolDepotId() => $"depot_{_nextToolDepotNumber++:D3}";
+    public string NextTrashBinId() => $"trash_{_nextTrashBinNumber++:D3}";
 
     public static EditableBlueprint FromBlueprintData(BlueprintData data)
     {
@@ -75,6 +78,12 @@ public class EditableBlueprint
             bp._nextToolDepotNumber = Math.Max(bp._nextToolDepotNumber, ExtractNumber(depot.id) + 1);
         }
 
+        foreach (TrashBinData bin in data.trashBins ?? Array.Empty<TrashBinData>())
+        {
+            bp.TrashBins.Add(bin);
+            bp._nextTrashBinNumber = Math.Max(bp._nextTrashBinNumber, ExtractNumber(bin.id) + 1);
+        }
+
         foreach (WorldPosition spawn in data.playerSpawns ?? Array.Empty<WorldPosition>())
             bp.PlayerSpawns.Add(spawn);
 
@@ -103,6 +112,7 @@ public class EditableBlueprint
             supplyZones = SupplyZones.ToArray(),
             orderStations = OrderStations.ToArray(),
             toolDepots = ToolDepots.ToArray(),
+            trashBins = TrashBins.ToArray(),
             playerSpawns = PlayerSpawns.ToArray(),
             contractDefaults = new ContractDefaults
             {

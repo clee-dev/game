@@ -133,15 +133,34 @@ public class OrderQueueSystem : NetworkBehaviour
         }
     }
 
+    // Small gap on top of the prefab's actual collider height so colliders don't spawn
+    // flush against each other -- flush AABBs can still generate a tiny initial overlap
+    // once Unity's physics solver factors in collision margins.
+    private const float StackGap = 0.05f;
+
+    // Deliveries used to spread items out horizontally with a hardcoded 0.5-unit offset,
+    // which is smaller than a WoodPlank's actual 1x1x1 collider -- guaranteed overlap,
+    // so the physics solver violently separated them on the first FixedUpdate ("items
+    // spawn inside each other and fly all over the place"). Stacking vertically instead,
+    // spaced by the prefab's real collider bounds, means each item drops a short distance
+    // onto the one below it and they settle under normal gravity instead of exploding apart.
     private void Deliver(PendingDelivery delivery, int quantity)
     {
+        float spacing = GetVerticalSpacing(delivery.prefab) + StackGap;
+
         for (int i = 0; i < quantity; i++)
         {
-            Vector3 offset = new Vector3(i * 0.5f, 0f, 0f);
-            var instance = Instantiate(delivery.prefab, delivery.position + offset, Quaternion.identity);
+            Vector3 spawnPos = delivery.position + new Vector3(0f, i * spacing, 0f);
+            var instance = Instantiate(delivery.prefab, spawnPos, Quaternion.identity);
             var netObj = instance.GetComponent<NetworkObject>();
             netObj.Spawn();
             netObj.DestroyWithScene = true;
         }
+    }
+
+    private static float GetVerticalSpacing(MaterialItem prefab)
+    {
+        var collider = prefab.GetComponent<Collider>();
+        return collider != null ? collider.bounds.size.y : 1f;
     }
 }

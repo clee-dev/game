@@ -59,6 +59,14 @@ ignored in Unity 6.
 _isHeld` replicates held state. Picking up requests ownership from server; dropping
 returns it.
 
+**Fall-out-of-world safety net (added this session):** `PhysicsPickup.Update()`
+despawns the object server-side once its Y position drops below `fallDespawnY`
+(default `-40f`, `[SerializeField]`, per-instance tunable). Anything that
+tunnels through thin/missing geometry was previously falling forever — a
+permanently lost material-cap slot, or a softlocked tool. Lives on the shared
+base class so both `MaterialItem` and `ToolItem` get it automatically.
+**Unverified in-Editor** — no Unity Editor available this session.
+
 `NetworkPlayer` disables camera, audio listener, and input components on all player
 objects except the local owner.
 
@@ -178,7 +186,7 @@ independently — but was incorrect.
 ### Interaction & Pickup
 
 `PlayerInteraction` — single forward raycast per frame. Checks in order:
-`LevelSelectKiosk` → `OrderStation` → `BuildTile` → `PhysicsPickup`.
+`LevelSelectKiosk` → `OrderStation` → `TrashBin` → `BuildTile` → `PhysicsPickup`.
 
 Handles: pickup, place-material, hold-to-build, drop/throw. Renders crosshair,
 order menu, kiosk menu, incoming-deliveries queue via `OnGUI` (no Canvas/uGUI
@@ -482,14 +490,52 @@ server-only. Spawn items and replace them after a cooldown.
 
 Not yet implemented: per-player-count scaling of cap or delay.
 
+**Fixed (this session): ordered items spawned inside each other and flew
+apart.** `Deliver()` used to spread a multi-item order out horizontally with a
+hardcoded `0.5f`-unit offset — smaller than a `WoodPlank`'s actual `1x1x1`
+collider, so every delivery after the first spawned overlapping the one before
+it and the physics solver violently separated them on the first
+`FixedUpdate`. `Deliver()` now stacks deliveries vertically instead, spaced by
+the prefab's actual `Collider.bounds.size.y` (read live off
+`delivery.prefab`, not a hardcoded constant — scales automatically to
+Concrete/Steel once those exist) plus a small `StackGap` (`0.05f`) so collider
+faces don't spawn flush against each other. Each item now drops a short
+distance onto the one below it and settles under normal gravity instead of
+exploding apart. **Unverified in-Editor** — no Unity Editor available this
+session.
+
+**Trash Bin (added this session):** `TrashBin.cs` — `NetworkObject`, one RPC
+(`TrashItemRpc(NetworkObjectReference)`, same trust model as
+`BuildTile.PlaceMaterialRpc`: `TryGet` → component check → act, no sender
+verification). Confirms the referenced object has a `PhysicsPickup` before
+despawning it, so it works on materials and tools alike. Player-requested
+recovery valve for ordering mistakes — not in `GAME_INTENT.md`. Wired into
+`PlayerInteraction` as a fifth raycast target (alongside `BuildTile` in the
+priority order above) and into the blueprint/Level Editor pipeline as a fifth
+`WorldObjectCategory` (see Blueprint System / Level Editor below). **The
+prefab asset itself is not yet created** — see
+`docs/wiring/trash-bin-prefab.md`. Until Cameron builds it and assigns
+`BuildSystem.trashBinPrefab` in the `Game1` scene Inspector, the
+`trashBins` blueprint loop spawns nothing (null-guarded, same as any other
+empty array).
+
 ---
 
 ### Blueprint System
 
 **Data classes** (`Assets/Scripts/Blueprint/BlueprintData.cs`): `BlueprintData`,
 `TileData`, `GridPosition`, `WorldPosition`, `SupplyZoneData`, `OrderStationData`,
-`ToolDepotData`, `ContractDefaults`, `CompletionThresholds`. All `[Serializable]`
-with public fields only (required for Newtonsoft + IL2CPP).
+`ToolDepotData`, `TrashBinData`, `ContractDefaults`, `CompletionThresholds`. All
+`[Serializable]` with public fields only (required for Newtonsoft + IL2CPP).
+
+**`TrashBinData` (added this session):** `{ id, worldPosition }`, same shape as
+`ToolDepotData`/`SupplyZoneData`. `BlueprintData.trashBins` is a newer field no
+existing saved blueprint JSON has — `BuildSystem.SpawnFromBlueprint()`
+null-guards this one array specifically (`?? Array.Empty<TrashBinData>()`)
+where the older world-object loops aren't guarded, since old blueprints
+loading fine with zero trash bins is the expected case, not an error.
+`EditableBlueprint` mirrors it the same way as `ToolDepots` (`List<TrashBinData>`,
+`NextTrashBinId()` numbering helper).
 
 **Enums** (`BlueprintEnums.cs`): `TileType`, `MaterialType`, `ToolType`, `TileState`,
 `MaterialState`.
@@ -590,6 +636,17 @@ within `pickRadius` (1 unit) of the click and replaces it in place (undoable,
 same as add) instead of stacking; falls through to add-new if the spot is
 empty. `PlayerSpawn`'s 4-player cap still applies on the add path only —
 replacing an existing spawn never changes the count.
+
+**`WorldObjectCategory.TrashBin` (added this session):** fifth category
+alongside `SupplyZone`/`OrderStation`/`ToolDepot`/`PlayerSpawn`. Same
+`PlaceOrReplace`/`RemoveNearest` click-to-place/right-click-to-erase behavior
+and undo/redo support as the other four; red marker color in
+`RefreshWorldObjectVisuals()` (`Assets/Materials/Red.mat`-colored, distinct
+from yellow OrderStation / orange ToolDepot markers). `LevelEditorUI.cs`
+needed no new button code for the brush selector — `DrawEnumRow`'s generic
+`CycleEnum<T>` already cycles through any enum's `Enum.GetValues`, including
+this new value — only a `Trash Bins: N` count label was added to the World
+Objects panel.
 
 **Pause overlay + Preview Mode conflict (Part B, found and fixed):** see "Pause
 Menu" below — `LevelEditorController` now has a `pauseCanvas` field toggled off

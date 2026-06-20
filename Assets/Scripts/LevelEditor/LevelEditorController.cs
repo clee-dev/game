@@ -28,7 +28,7 @@ using UnityEngine.InputSystem;
 public class LevelEditorController : MonoBehaviour
 {
     public enum EditorMode { Tiles, WorldObjects, Preview }
-    public enum WorldObjectCategory { SupplyZone, OrderStation, ToolDepot, PlayerSpawn }
+    public enum WorldObjectCategory { SupplyZone, OrderStation, ToolDepot, TrashBin, PlayerSpawn }
 
     public const float CellSize = BuildSystem.CellSize;
 
@@ -324,6 +324,10 @@ public class LevelEditorController : MonoBehaviour
                 PlaceOrReplace(Blueprint.ToolDepots, d => d.worldPosition.ToVector3(), worldPos,
                     () => new ToolDepotData { id = Blueprint.NextToolDepotId(), worldPosition = ToWorldPosition(worldPos), tools = new[] { "hammer" } });
                 break;
+            case WorldObjectCategory.TrashBin:
+                PlaceOrReplace(Blueprint.TrashBins, d => d.worldPosition.ToVector3(), worldPos,
+                    () => new TrashBinData { id = Blueprint.NextTrashBinId(), worldPosition = ToWorldPosition(worldPos) });
+                break;
             case WorldObjectCategory.PlayerSpawn:
                 PlaceOrReplace(Blueprint.PlayerSpawns, d => d.ToVector3(), worldPos,
                     () => ToWorldPosition(worldPos), maxCount: 4);
@@ -381,6 +385,9 @@ public class LevelEditorController : MonoBehaviour
                 break;
             case WorldObjectCategory.ToolDepot:
                 RemoveNearest(Blueprint.ToolDepots, d => d.worldPosition.ToVector3(), worldPos, pickRadius);
+                break;
+            case WorldObjectCategory.TrashBin:
+                RemoveNearest(Blueprint.TrashBins, d => d.worldPosition.ToVector3(), worldPos, pickRadius);
                 break;
             case WorldObjectCategory.PlayerSpawn:
                 RemoveNearest(Blueprint.PlayerSpawns, d => d.ToVector3(), worldPos, pickRadius);
@@ -471,6 +478,7 @@ public class LevelEditorController : MonoBehaviour
     private static readonly Color SupplyZoneColor = Color.green;
     private static readonly Color OrderStationColor = Color.yellow;
     private static readonly Color ToolDepotColor = new(1f, 0.5f, 0f);
+    private static readonly Color TrashBinColor = Color.red;
     private static readonly Color PlayerSpawnColor = Color.cyan;
 
     private void RefreshWorldObjectVisuals()
@@ -484,6 +492,8 @@ public class LevelEditorController : MonoBehaviour
             _worldObjectVisuals.Add(CreateWorldObjectMarker(station.worldPosition.ToVector3(), OrderStationColor));
         foreach (ToolDepotData depot in Blueprint.ToolDepots)
             _worldObjectVisuals.Add(CreateWorldObjectMarker(depot.worldPosition.ToVector3(), ToolDepotColor));
+        foreach (TrashBinData bin in Blueprint.TrashBins)
+            _worldObjectVisuals.Add(CreateWorldObjectMarker(bin.worldPosition.ToVector3(), TrashBinColor));
         foreach (WorldPosition spawn in Blueprint.PlayerSpawns)
             _worldObjectVisuals.Add(CreateWorldObjectMarker(spawn.ToVector3(), PlayerSpawnColor));
     }
