@@ -34,10 +34,19 @@ public class BuildTile : NetworkBehaviour
     [SerializeField] [Range(0f, 1f)] private float builtGreenBlend = 0.5f;
     [SerializeField] [Range(0f, 1f)] private float destroyedRedBlend = 0.6f;
 
+    [Header("Smart Walls -- only read when Type == TileType.Wall (Systems Architecture, Section 10)")]
+    [SerializeField] private WallMeshSet wallMeshSet;
+
     // Cached MeshRenderers on placedMaterialVisual/builtVisual -- both GameObjects carry a
     // MeshRenderer directly on their own root, so no extra Inspector fields are needed.
     private MeshRenderer _placedRenderer;
     private MeshRenderer _builtRenderer;
+
+    // Cached MeshFilters on ghost/placedMaterialVisual/builtVisual -- Smart Walls swaps the
+    // mesh on all three so whichever one RefreshVisual() activates already shows the right shape.
+    private MeshFilter _ghostFilter;
+    private MeshFilter _placedFilter;
+    private MeshFilter _builtFilter;
 
     [Header("Progress Bar -- world space canvas")]
     [SerializeField] private GameObject progressBarRoot;
@@ -65,6 +74,11 @@ public class BuildTile : NetworkBehaviour
 
     private readonly NetworkVariable<ulong> _buildingClientId = new(
         NoBuilder, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+
+    /// <summary>4-bit N/E/S/W connection mask (Smart Wall System, Section 10) -- only ever
+    /// non-zero for Type == TileType.Wall. Server-written via RecalculateWallMask().</summary>
+    private readonly NetworkVariable<byte> _wallMask = new(
+        0, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 
     // Server-only
     private NetworkObject _placedMaterial;
@@ -96,8 +110,13 @@ public class BuildTile : NetworkBehaviour
         if (placedMaterialVisual != null) _placedRenderer = placedMaterialVisual.GetComponent<MeshRenderer>();
         if (builtVisual != null) _builtRenderer = builtVisual.GetComponent<MeshRenderer>();
 
+        if (ghostRenderer != null) _ghostFilter = ghostRenderer.GetComponent<MeshFilter>();
+        if (placedMaterialVisual != null) _placedFilter = placedMaterialVisual.GetComponent<MeshFilter>();
+        if (builtVisual != null) _builtFilter = builtVisual.GetComponent<MeshFilter>();
+
         _state.OnValueChanged += OnStateChanged;
         _buildProgress.OnValueChanged += (_, val) => UpdateProgressBar(val);
+        _wallMask.OnValueChanged += (_, _) => RefreshVisual();
 
         RefreshVisual();
     }
@@ -123,6 +142,15 @@ public class BuildTile : NetworkBehaviour
             // the IsServer guard -- _state replicates everywhere, but only the server may
             // write the NetworkVariables a further collapse would touch.
             BuildSystem.Instance.CascadeCollapseFrom(GridPosition);
+        }
+
+        // Smart Walls (Section 10) -- only Wall tiles connect to each other (Door/Window
+        // are out of scope, see SMART_WALLS_1.md open questions), so non-Wall state changes
+        // skip this entirely instead of paying for a 4-neighbor scan that would no-op anyway.
+        if (IsServer && Type == TileType.Wall)
+        {
+            RecalculateWallMask();
+            BuildSystem.Instance.NotifyNeighborsForWallMask(GridPosition);
         }
     }
 
@@ -176,6 +204,19 @@ public class BuildTile : NetworkBehaviour
 
         if (progressBarRoot != null)
             progressBarRoot.SetActive(_state.Value == TileState.MaterialPlaced && _buildProgress.Value > 0f);
+
+        if (Type == TileType.Wall && wallMeshSet != null)
+        {
+            var (variant, yRotation) = WallVariantLookup.GetVariant(_wallMask.Value);
+            Mesh mesh = wallMeshSet.MeshFor(variant);
+            if (mesh != null)
+            {
+                if (_ghostFilter != null) _ghostFilter.sharedMesh = mesh;
+                if (_placedFilter != null) _placedFilter.sharedMesh = mesh;
+                if (_builtFilter != null) _builtFilter.sharedMesh = mesh;
+            }
+            transform.localEulerAngles = new Vector3(0f, yRotation, 0f);
+        }
     }
 
     /// <summary>Stand-in for real per-material textures (none exist yet -- see
@@ -328,5 +369,33 @@ public class BuildTile : NetworkBehaviour
         _buildProgress.Value = 0f;
         _buildingClientId.Value = NoBuilder;
         _state.Value = TileState.Destroyed;
+    }
+
+    // -------------------------------------------------------------------------
+    // Smart Walls (Section 10) -- server-only bitmask autotiling. Each Wall tile
+    // checks its 4 horizontal neighbors and sets one bit per neighbor that's itself
+    // a connected Wall (MaterialPlaced or Built). WallVariantLookup turns that mask
+    // into a mesh variant + Y rotation, applied in RefreshVisual().
+    // -------------------------------------------------------------------------
+
+    public void RecalculateWallMask()
+    {
+        if (!IsServer) return;
+        if (Type != TileType.Wall) return;
+
+        byte mask = 0;
+        if (IsConnectedWall(GridPosition + Vector3Int.forward)) mask |= WallVariantLookup.North;
+        if (IsConnectedWall(GridPosition + Vector3Int.right))   mask |= WallVariantLookup.East;
+        if (IsConnectedWall(GridPosition + Vector3Int.back))    mask |= WallVariantLookup.South;
+        if (IsConnectedWall(GridPosition + Vector3Int.left))    mask |= WallVariantLookup.West;
+
+        _wallMask.Value = mask;
+    }
+
+    private static bool IsConnectedWall(Vector3Int pos)
+    {
+        BuildTile neighbor = BuildSystem.Instance.GetLiveTileAt(pos);
+        if (neighbor == null || neighbor.Type != TileType.Wall) return false;
+        return neighbor.State == TileState.MaterialPlaced || neighbor.State == TileState.Built;
     }
 }

@@ -397,6 +397,109 @@ of the same information with its own staleness risk, so the cascade reuses
 
 ---
 
+### Smart Wall System
+
+**What it is:** Bitmask autotiling for `TileType.Wall` tiles only (`SMART_WALLS_1.md`)
+— Door/Window are explicitly out of scope, flagged as open questions below, not
+wired. Each Wall tile tracks a 4-bit N/E/S/W connection mask describing which of
+its horizontal neighbors are themselves connected Wall tiles, and resolves that
+mask to a mesh shape + Y rotation so straight runs, corners, T-junctions, and
+4-way crosses render distinctly instead of every Wall tile looking identical.
+
+- **`WallMeshVariant`** (`Assets/Scripts/Build/WallMeshVariant.cs`) — the 6 mesh
+  shapes a mask resolves to: `Standalone, EndCap, Straight, Corner, TJunction,
+  Cross`.
+- **`WallVariantLookup`** (`Assets/Scripts/Build/WallVariantLookup.cs`) — the
+  bitmask-to-variant table. Bit constants `North = 1, East = 2, South = 4, West
+  = 8` (mask range 0–15); `GetVariant(byte mask)` is a deterministic 16-entry
+  switch returning `(WallMeshVariant variant, float yRotation)`. Rotation
+  convention: `EndCap`'s open end faces South at 0°, `Straight` runs N-S at 0°,
+  `Corner` connects North+East at 0°, `TJunction`'s open side faces West at 0°,
+  all rotating clockwise as the mask changes; `Cross` and `Standalone` are
+  rotationally symmetric (always 0°). Both `BuildTile` (runtime) and
+  `LevelEditorController` (author-time) build masks against these same bit
+  values so they always resolve to identical variants/rotations.
+- **`WallMeshSet`** (`Assets/Scripts/Build/WallMeshSet.cs`) — a `ScriptableObject`
+  holding one `Mesh` per `WallMeshVariant`, assigned to `BuildTile.wallMeshSet`
+  in the Inspector. This is the first custom `ScriptableObject` in the codebase.
+  Swapping meshes (prototype cubes → real modular wall art) needs zero code
+  changes since `WallVariantLookup` only ever deals in `WallMeshVariant`, never
+  a concrete mesh.
+- **`BuildTile._wallMask`** — server-write `NetworkVariable<byte>`, everyone-read,
+  same pattern as `_state`/`_buildProgress`. `RecalculateWallMask()` (server-only,
+  no-ops if `Type != TileType.Wall`) checks all 4 horizontal neighbors via
+  `BuildSystem.GetLiveTileAt` and sets one bit per neighbor that's itself a Wall
+  in `MaterialPlaced` or `Built` state, then writes the new mask.
+  `RefreshVisual()` (runs identically on every machine, pure function of
+  replicated state) reads `WallVariantLookup.GetVariant(_wallMask.Value)` and
+  swaps `sharedMesh` on the ghost/placed/built `MeshFilter`s to match, then sets
+  `transform.localEulerAngles` to the resolved Y rotation. Rotation is
+  collision-safe: `BuildTile.prefab`'s `BoxCollider` is a symmetric `{1,1,1}`
+  cube, so rotating it in 90° steps doesn't change its footprint.
+- **Trigger points** — `BuildTile.OnStateChanged`, gated `IsServer && Type ==
+  TileType.Wall` (skipped entirely for non-Wall tiles instead of paying for a
+  4-neighbor scan that would no-op anyway), calls `RecalculateWallMask()` on
+  itself then `BuildSystem.NotifyNeighborsForWallMask(GridPosition)` so
+  newly-connected/disconnected Wall neighbors re-run their own mask one hop out.
+  `BuildSystem.SpawnFromBlueprint()` does a second pass over every live Wall
+  tile after the initial spawn loop, calling `RecalculateWallMask()` once each
+  — needed because `BuildTile.OnNetworkSpawn` only registers a tile in
+  `_liveTilesByPosition`, it doesn't compute a mask, so a tile spawned early in
+  the loop can't yet see neighbors spawned later in the same loop.
+- **Level Editor mirror** — `LevelEditorController._editorWallVariants`
+  (`Dictionary<Vector3Int, (WallMeshVariant, float)>`) is the author-time
+  equivalent, existence-based instead of state-based (the editor's blueprint has
+  no `MaterialPlaced`/`Built` concept, same as `CanPlaceTileType`'s structural
+  check). `RebuildEditorWallVariants()` recomputes every Wall tile's mask from
+  scratch against the current `Blueprint`, called from a `BlueprintChanged`
+  handler registered in `Awake()` and explicitly from `ApplyRemoteBlueprint()`
+  (the one path that doesn't fire `BlueprintChanged`). `CreateTileCube()` reads
+  the rebuilt dictionary and applies the Y rotation to each spawned preview cube.
+  **Adaptation from spec:** `SMART_WALLS_1.md` described two mechanisms — an
+  incremental `RefreshEditorWallVariantsAround(pos)` for place/erase, plus a
+  separate full-rebuild path for undo/redo. Implemented as a single full-rebuild
+  on every `BlueprintChanged` instead: `Commands.Changed` (and therefore
+  `BlueprintChanged`) fires identically for Run/Undo/Redo with no way to
+  distinguish which triggered it or extract which position changed, since
+  command closures are opaque at the `EditorCommandStack` level — so the
+  incremental path can't actually be implemented for undo/redo. The spec itself
+  notes the blueprint is small enough that a full pass is fine, which is the
+  justification for using that cheaper-to-implement uniform approach everywhere
+  rather than maintaining two code paths.
+- **Asset wiring still pending** — see `docs/wiring/wall-mesh-set-default-asset.md`.
+  No `WallMeshSet` asset instance exists yet; `BuildTile.prefab.wallMeshSet` is
+  unassigned until Cameron creates and wires it in-Editor (consistent with this
+  codebase's convention that new `.prefab`/`.asset` instances are hand-authored
+  by Cameron, not generated by the AI).
+- **Open questions, flagged per `SMART_WALLS_1.md`, not wired:**
+  - Door/Window tiles don't participate in wall connections at all right now —
+    a Wall tile next to a Door/Window sees it as "no connection," same as empty
+    space. Should Door/Window count as a connection for the Wall's mask (and if
+    so, does the Door/Window itself need any visual response)?
+  - No diagonal connections — only the 4 cardinal neighbors are checked, so two
+    Wall tiles touching only at a corner don't connect. Intentional per spec;
+    flagging in case that's not the intended look once real modular art is in.
+  - No vertical/multi-story connections — the mask is purely horizontal (N/E/S/W
+    on one Y layer); a Wall tile directly above/below another Wall tile doesn't
+    affect either mask. Open question if multi-story buildings need vertical
+    wall continuity to read correctly.
+  - Y-rotation + collision safety is **resolved, not open** — confirmed
+    `BuildTile.prefab`'s `BoxCollider` is a symmetric `{1,1,1}` cube, so the
+    90°-step rotation applied in `RefreshVisual()`/`CreateTileCube()` is safe.
+- **Unverified — no Unity Editor or C# compiler available this session.** All
+  changes were hand-verified by direct read only. Once `WallMeshSet_Default`
+  exists and is wired (see the wiring doc), playtest: place a single Wall tile
+  and confirm it shows `Standalone`; place a second Wall tile adjacent to it and
+  confirm both flip to `EndCap` facing each other; extend to a 3-tile straight
+  run and confirm the middle tile shows `Straight`; form an L and confirm the
+  corner tile shows `Corner` at the right rotation; form a T and a + and confirm
+  `TJunction`/`Cross`; confirm the Level Editor's preview cubes rotate to match
+  exactly what the same layout produces in-game; confirm destroying/repairing a
+  Wall tile (Structural Integrity collapse/repair above) correctly updates its
+  neighbors' masks live.
+
+---
+
 ### Timer System (Phase B)
 
 `LevelTimer` — in-scene-placed `NetworkObject` in `Game1.unity` (same pattern as

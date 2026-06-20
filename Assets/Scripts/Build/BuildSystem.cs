@@ -130,6 +130,15 @@ public class BuildSystem : MonoBehaviour
             netObj.DestroyWithScene = true;
         }
 
+        // Second pass (Smart Walls, Section 10): every tile is registered in
+        // _liveTilesByPosition by now (BuildTile.OnNetworkSpawn runs synchronously from
+        // Spawn() above), so each Wall tile can see its neighbors to compute its initial
+        // connection mask. Doing this inside the loop above would miss not-yet-spawned
+        // neighbors further along in tiles.
+        foreach (BuildTile liveTile in _liveTilesByPosition.Values)
+            if (liveTile.Type == TileType.Wall)
+                liveTile.RecalculateWallMask();
+
         foreach (SupplyZoneData zone in CurrentBlueprint.supplyZones)
             Instantiate(supplyZoneSpawnerPrefab, zone.worldPosition.ToVector3(), Quaternion.identity);
 
@@ -192,6 +201,25 @@ public class BuildSystem : MonoBehaviour
         GetLiveTileAt(pos + Vector3Int.down)?.RefreshEligibility();
         foreach (var dir in TileStructuralRules.HorizontalNeighbors)
             GetLiveTileAt(pos + dir)?.RefreshEligibility();
+    }
+
+    /// <summary>
+    /// Server-only, one-hop (Section 10 -- Smart Wall System). Called by a Wall tile
+    /// whenever its own state changes, so its Wall neighbors re-run their bitmask and pick
+    /// up/drop the connection. Wall connections are Wall-to-Wall only -- Door/Window are
+    /// out of scope (see SMART_WALLS_1.md open questions) -- so non-Wall neighbors are
+    /// skipped rather than recalculated.
+    /// </summary>
+    public void NotifyNeighborsForWallMask(Vector3Int origin)
+    {
+        if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsServer) return;
+
+        foreach (var dir in TileStructuralRules.HorizontalNeighbors)
+        {
+            BuildTile neighbor = GetLiveTileAt(origin + dir);
+            if (neighbor != null && neighbor.Type == TileType.Wall)
+                neighbor.RecalculateWallMask();
+        }
     }
 
     // -------------------------------------------------------------------------
