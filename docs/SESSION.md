@@ -1083,3 +1083,90 @@ Summary:
 - The 4 open questions above (Door/Window, diagonal, vertical/multi-story
   connections) are unresolved design decisions, not implementation gaps —
   none are wired, all deliberately deferred per the spec's explicit scope.
+
+## 2026-06-20 (Part E)
+
+Cameron wired `WallMeshSet-Default.asset` with real modular wall FBX meshes
+and assigned it to `BuildTile.prefab` outside this session (commit `5b380a4`,
+"wall meshes" — 313 files, mostly an imported generic asset pack). He then
+reported: "I added the meshes and hooked them up but I don't see it working."
+
+### Diagnosis (read-only against `origin/main`, no Editor access)
+
+Used `git show`/`git grep` against the commit directly (no checkout of the
+working branch) to rule things out one at a time:
+
+- `WallMeshSet-Default.asset`'s script reference and all 6 mesh slots: correct.
+  Resolved each mesh guid back to its source `.fbx` — `standaloneMesh →
+  wall-low.fbx`, `endCapMesh → endcap_wall.fbx`, `straightMesh → wall.fbx`,
+  `cornerMesh → wall-corner.fbx`, `tJunctionMesh → t_wall.fbx`, `crossMesh →
+  cross_wall.fbx` — all semantically right, no slot mistake.
+- `BuildTile.prefab.wallMeshSet`'s guid matches the asset exactly: correct.
+- The included `blueprint_test wall.json` is a closed rectangular wall loop —
+  every tile has exactly 2 neighbors, so it can only ever resolve to
+  `Straight`/`Corner`. Absence of `EndCap`/`TJunction`/`Cross` in that specific
+  test layout is expected from the topology, not a bug.
+- The 6 raw FBX prefabs Cameron also dropped into `Hub.unity` (`wall-corner`,
+  `endcap_wall`, `t_wall`, `corner_wall`, `wall`, `column-triangle-low`) are
+  loose reference props, not routed through `BuildTile`/the blueprint
+  pipeline at all — looking at those doesn't exercise the feature.
+- **Actual bug found:** `BuildTile.prefab` is one generic prefab shared by
+  every `TileType`. Its Ghost/Placed/Built visual children all carry
+  `localScale {1, 0.2, 1}` — a thin slab tuned for Foundation/Floor.
+  `RefreshVisual()` swapped `sharedMesh` for Wall tiles but never touched that
+  scale, so the real (full-height) wall meshes were rendering squashed to 20%
+  height — easy to read as "nothing happened."
+
+### Fix
+
+- `BuildTile.cs` `RefreshVisual()` — alongside the existing `sharedMesh` swap
+  for Wall tiles, now also resets each of Ghost/Placed/Built's
+  `transform.localScale` to `Vector3.one`, gated by the same `Type ==
+  TileType.Wall && wallMeshSet != null && mesh != null` check so
+  Foundation/Floor/etc. keep their original squash untouched.
+
+### Follow-up: Level Editor preview
+
+Cameron asked whether Wall tiles should render as real meshes in the Level
+Editor too, since they're still plain colored cubes there (the wiring doc's
+note that "a cube looks identical at every 90° rotation" no longer applies
+now that real art exists). Implemented:
+
+- `LevelEditorController.cs` — new `[SerializeField] private WallMeshSet
+  wallMeshSet` field (same asset `BuildTile` reads). `CreateTileCube()` now
+  swaps the placeholder cube for `wallMeshSet.MeshFor(variant)` on Wall tiles
+  when assigned, at `localScale` 1 (full layer) or `0.4/0.85` (matches the
+  existing off-layer cube dimming ratio). Falls back to the original colored
+  cube — unchanged for every other `TileType` — when unassigned.
+- `docs/wiring/level-editor-wall-mesh-preview.md` — new wiring doc for the one
+  remaining step: drag `WallMeshSet-Default.asset` onto the new field on the
+  `LevelEditorController` instance in `LevelEditor.unity`.
+- `docs/ARCHITECTURE.md` — updated the Smart Wall System section: asset
+  wiring marked done (was "pending"), added the scale-bug/fix and the Level
+  Editor preview feature, updated the playtest checklist.
+
+### Changes made this session
+
+- `Assets/Scripts/Build/BuildTile.cs` — scale-squash fix in `RefreshVisual()`.
+- `Assets/Scripts/LevelEditor/LevelEditorController.cs` — `wallMeshSet` field,
+  real-mesh swap + scale/rotation in `CreateTileCube()`.
+- `docs/ARCHITECTURE.md` — Smart Wall System section updated (asset wiring
+  status, scale bug + fix, Level Editor preview feature, playtest checklist).
+- `docs/wiring/level-editor-wall-mesh-preview.md` — new wiring doc.
+- `docs/SESSION.md` — this entry.
+
+### Open items for Cameron to review
+
+- **Not compiled or run.** No Unity Editor or C# compiler available this
+  session — please confirm the project builds and the squash fix actually
+  un-flattens the wall meshes in `Game1`.
+- Wire `WallMeshSet-Default.asset` onto the new `LevelEditorController.wallMeshSet`
+  field per `docs/wiring/level-editor-wall-mesh-preview.md`.
+- The off-layer dim/shrink ratio (`0.4/0.85`) for the Level Editor's real-mesh
+  preview was chosen to match the existing placeholder cube's ratio for visual
+  consistency — adjust if the real meshes read oddly at that scale once seen
+  in-Editor.
+- `wall-mesh-set-default-asset.md` describes the original prototype-cube
+  version of the asset-wiring step; Cameron's actual `WallMeshSet-Default.asset`
+  supersedes it with real art directly. Per CLAUDE.md convention I haven't
+  moved or edited that file — move it to `docs/wiring/done/` when convenient.

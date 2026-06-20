@@ -43,6 +43,12 @@ public class LevelEditorController : MonoBehaviour
     /// Escape-to-exit-Preview binding.</summary>
     [SerializeField] private GameObject pauseCanvas;
 
+    /// <summary>Same asset BuildTile.wallMeshSet reads at runtime (Smart Wall System,
+    /// Section 10) -- lets Wall tile previews show the real connection-shaped mesh
+    /// instead of an undifferentiated cube. Null-safe: CreateTileCube falls back to the
+    /// plain colored cube (every other TileType's look) when this is unassigned.</summary>
+    [SerializeField] private WallMeshSet wallMeshSet;
+
     /// <summary>Host-only editing (per Cameron: "only the host can make edits, other
     /// players just get the camera"). The host/server in this P2P transport IS the
     /// editing player, so this maps directly onto NGO's IsServer.</summary>
@@ -491,6 +497,11 @@ public class LevelEditorController : MonoBehaviour
             _tileVisuals[pos] = CreateTileCube(pos, tile);
     }
 
+    // Off-layer cubes shrink to this fraction of their on-layer size (matches the
+    // placeholder cube's existing 0.4/0.85 ratio) -- applied to real wall meshes too so
+    // the "other layers, dimmed and smaller" read stays consistent across both visuals.
+    private const float OffLayerScaleRatio = 0.4f / 0.85f;
+
     private GameObject CreateTileCube(Vector3Int pos, TileData tile)
     {
         var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -498,15 +509,27 @@ public class LevelEditorController : MonoBehaviour
         go.transform.SetParent(_visualsRoot);
 
         bool onCurrentLayer = pos.y == CurrentLayer;
-        float scale = onCurrentLayer ? CellSize * 0.85f : CellSize * 0.4f;
         go.transform.position = new Vector3((pos.x + 0.5f) * CellSize, pos.y * CellSize, (pos.z + 0.5f) * CellSize);
-        go.transform.localScale = Vector3.one * scale;
 
-        // Smart Wall System (Section 10) -- a plain cube looks identical at every 90-degree
-        // Y rotation, so this is a no-op until wallMeshSet's prototype cubes are replaced
-        // with real modular wall meshes. The rotation is still applied now so the data path
-        // (mask -> variant -> rotation) is exercised and correct ahead of that swap.
-        if (_editorWallVariants.TryGetValue(pos, out var wallVariant))
+        bool isWall = BlueprintEnums.ParseTileType(tile.type) == TileType.Wall;
+        _editorWallVariants.TryGetValue(pos, out var wallVariant);
+
+        // Smart Wall System (Section 10) -- swaps the cube for the real connection-shaped
+        // mesh (same WallMeshSet BuildTile reads at runtime) so corner/T-junction/cross
+        // runs read correctly here instead of every Wall tile looking like the same cube.
+        Mesh wallMesh = isWall && wallMeshSet != null ? wallMeshSet.MeshFor(wallVariant.variant) : null;
+        if (wallMesh != null)
+        {
+            go.GetComponent<MeshFilter>().sharedMesh = wallMesh;
+            go.transform.localScale = Vector3.one * (onCurrentLayer ? 1f : OffLayerScaleRatio);
+        }
+        else
+        {
+            float scale = onCurrentLayer ? CellSize * 0.85f : CellSize * 0.4f;
+            go.transform.localScale = Vector3.one * scale;
+        }
+
+        if (isWall)
             go.transform.localEulerAngles = new Vector3(0f, wallVariant.yRotation, 0f);
 
         Color color = TileColors.TryGetValue(BlueprintEnums.ParseTileType(tile.type), out Color c) ? c : Color.white;

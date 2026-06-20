@@ -211,9 +211,13 @@ public class BuildTile : NetworkBehaviour
             Mesh mesh = wallMeshSet.MeshFor(variant);
             if (mesh != null)
             {
-                if (_ghostFilter != null) _ghostFilter.sharedMesh = mesh;
-                if (_placedFilter != null) _placedFilter.sharedMesh = mesh;
-                if (_builtFilter != null) _builtFilter.sharedMesh = mesh;
+                // Ghost/Placed/Built default to localScale {1, 0.2, 1} -- a thin slab
+                // tuned for Foundation/Floor, since all TileTypes share this one prefab.
+                // Wall meshes are modeled at full height, so they need that squash undone
+                // or they render as a flattened sliver of themselves.
+                if (_ghostFilter != null) { _ghostFilter.sharedMesh = mesh; _ghostFilter.transform.localScale = Vector3.one; }
+                if (_placedFilter != null) { _placedFilter.sharedMesh = mesh; _placedFilter.transform.localScale = Vector3.one; }
+                if (_builtFilter != null) { _builtFilter.sharedMesh = mesh; _builtFilter.transform.localScale = Vector3.one; }
             }
             transform.localEulerAngles = new Vector3(0f, yRotation, 0f);
         }
