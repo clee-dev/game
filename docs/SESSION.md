@@ -626,3 +626,105 @@ self-contained and unrelated to `PlayerCamera`/`NetworkPlayer` — no overlap.
 - Playtest: leave Level Editor back to Hub, confirm mouse look still
   re-engages correctly (this path was already covered by Part E but is worth
   re-checking given the new code right next to it).
+
+---
+
+## 2026-06-20
+
+**Context from Cameron:** "look at my claude.md document, start working on
+the structural integrity system" — `GAME_INTENT.md` §4.4 / `PLANNED_FEATURES.md`
+describe a Jenga-style collapse cascade as a Phase D feature (originally
+planned alongside chaos events). No Unity Editor or C# compiler available this
+session either — all changes hand-verified by direct read, **not compiled or
+opened in-Editor.**
+
+### Doc drift found and fixed
+
+`docs/ARCHITECTURE.md`'s "Dependency rules (implemented)" section described a
+uniform "needs tile below Built" rule for Floor/Wall/Furniture. The actual
+rule in `TileStructuralRules.cs` is type-pair-specific (Foundation needs only
+empty space below it; Floor/Column need a Built Foundation below; Wall/Window/
+Door/Furniture/Column need a Built Floor below; Decor needs a Built Wall
+*adjacent*, not below). Rewrote that section to match the real code.
+
+### Two design questions asked instead of assumed (per CLAUDE.md)
+
+1. Nothing currently destroys a tile — chaos events (the intended trigger)
+   are Phase D and don't exist yet. Asked whether to add a minimal host-only
+   debug trigger so the cascade is testable now, or build pure infrastructure
+   with no trigger. **Cameron chose: add the debug trigger.**
+2. Once a tile collapses to `Destroyed`, can players repair it, or is it
+   permanently lost for the rest of the level? **Cameron chose: repairable**
+   (matches the "demand-driven construction" pillar, avoids unwinnable
+   states).
+
+### Structural Integrity / Collapse Cascade — implemented
+
+No separate `supportDependents` graph, despite that being the original plan
+in `PLANNED_FEATURES.md`. `TileStructuralRules.HasSupport` already re-derives
+live support from neighbor tile state (shared by `BuildSystem` at runtime and
+the Level Editor at author-time) — a cached reverse-edge graph would just be
+a second copy of the same information with its own staleness risk. The
+cascade reuses it via `BuildSystem.IsEligible` instead.
+
+- **`BuildTile.Collapse()`** (new, public) — stops any in-progress build
+  coroutine, despawns a placed raw material via the new
+  `MaterialItem.DestroyInCollapse()`, resets build progress, sets `_state` to
+  `Destroyed`. Idempotent (`if (_state.Value == TileState.Destroyed) return`)
+  — this is what breaks any cascade cycle, no recursion bookkeeping needed.
+- **`BuildSystem.CascadeCollapseFrom(Vector3Int)`** + private
+  `CollapseIfUnsupported` (new) — server-only, checks the position's up + 4
+  horizontal neighbors (the only directions `TileStructuralRules` lets
+  anything depend on; support never flows downward) and collapses any
+  `MaterialPlaced`/`Built` neighbor no longer `IsEligible`. Called from
+  `BuildTile.OnStateChanged` when a tile becomes `Destroyed`, so each
+  collapse re-enters the chain automatically.
+- **`MaterialItem.DestroyInCollapse()`** (new) — despawns the raw material
+  sitting on a collapsing `MaterialPlaced` tile, mirroring the existing
+  `ConsumeAsBuilt()`. `OrderQueueSystem`'s material-cap bookkeeping
+  (`RegisterMaterialDespawned`) still fires correctly through
+  `OnNetworkDespawn`, verified by trace.
+- **Repairable `Destroyed` state:** `BuildTile.CanAcceptMaterial` now treats
+  `Destroyed` like `Empty` (still gated by `IsEligible`, so a tile can't be
+  rebuilt until whatever supports it is restored first).
+  - Ghost visual now also shows (red-tinted, via new `destroyedRedBlend`) on
+    `Destroyed` tiles, not just `Empty`.
+- **Host-only debug trigger** in `PlayerInteraction.cs` — Backspace collapses
+  whatever tile the player is looking at, gated by `IsServer` (no RPC needed
+  since the host process is the server). On-screen hint shown only to the
+  host, only while targeting a collapsible tile. Explicitly a stand-in for
+  the real trigger (chaos events, Phase D) — should be removed once that
+  lands.
+
+### Changes made this session
+
+- `Assets/Scripts/Build/BuildTile.cs` — `Collapse()`, `Destroyed`-aware
+  ghost visual + repair eligibility, cascade call from `OnStateChanged`.
+- `Assets/Scripts/Build/BuildSystem.cs` — `CascadeCollapseFrom` /
+  `CollapseIfUnsupported`.
+- `Assets/Scripts/Build/MaterialItem.cs` — `DestroyInCollapse()`.
+- `Assets/Scripts/PlayerInteraction.cs` — host-only debug demolish trigger +
+  on-screen hint.
+- `docs/ARCHITECTURE.md` — corrected the stale dependency-rules section, new
+  "Structural Integrity / Collapse Cascade" section.
+- `docs/PLANNED_FEATURES.md` — marked the feature built, documented the
+  no-graph/repairable/debug-trigger decisions, left "real trigger (chaos
+  events)" as the one remaining open item.
+
+### Open items for Cameron to review
+
+- **Not compiled or run.** No Unity Editor or C# compiler available this
+  session — please confirm the project builds.
+- Playtest: stand on a Built tile that's load-bearing for something above or
+  beside it (e.g. a Foundation under a Floor, a Floor under a Wall), press
+  Backspace as host, confirm the dependent tile(s) also collapse
+  (red-tinted ghost) and any raw material placed-but-not-built on them
+  despawns instead of floating.
+- Playtest: confirm a multi-level cascade actually chains (destroy a
+  Foundation under a Floor under a Wall — both Floor and Wall should fall in
+  sequence, not just the Floor).
+- Playtest: confirm a `Destroyed` tile can be repaired (material placed
+  again) once its own support is intact, and cannot be while support is
+  still missing.
+- Debug-only Backspace trigger is intentionally temporary — remove once
+  chaos events (Phase D) provide the real trigger.

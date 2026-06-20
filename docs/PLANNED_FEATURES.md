@@ -396,19 +396,56 @@ TBD. No implementation started.
 
 ---
 
-## Structural Integrity / Collapse Cascade
+## Structural Integrity / Collapse Cascade — built
 
-**What it is:** A `supportDependents` graph where destroying a load-bearing tile
-triggers a collapse cascade (Jenga-style). Planned for Phase D alongside chaos
-events since it's most useful as an event outcome.
+**What it is:** Destroying a load-bearing tile triggers a collapse cascade
+(Jenga-style) through anything that depended on it for support. Originally
+planned for Phase D alongside chaos events since it's most useful as an event
+outcome — built ahead of schedule as infrastructure, since chaos events
+(the eventual real trigger) don't exist yet.
 
-**Decisions made:**
-- Each tile tracks what it supports
-- Destroying a tile evaluates whether dependents are still supported
-- Unsupported tiles fall/are destroyed in sequence
+**Decisions made (revised from the original plan above):**
+- No separate `supportDependents` graph. `TileStructuralRules.HasSupport`
+  already re-derives "is this position currently supported" live from
+  neighbor tile states (used by both `BuildSystem` at runtime and the Level
+  Editor at author-time) — a cached reverse-edge graph would just be a second
+  copy of the same information with its own staleness risk. The cascade
+  reuses it via `BuildSystem.IsEligible` instead.
+- Destroying a tile (`BuildTile.Collapse()`) checks its up + 4 horizontal
+  neighbors (`BuildSystem.CascadeCollapseFrom`) and collapses any that are no
+  longer supported by anything else. Each collapse re-enters `OnStateChanged`,
+  so the cascade continues automatically with no explicit recursion
+  bookkeeping. Terminates because a tile can only transition to `Destroyed`
+  once (idempotent guard in `Collapse()`).
+- `Destroyed` is **repairable** — treated like `Empty` for
+  `CanAcceptMaterial`, still gated by `IsEligible` so a tile can't be
+  rebuilt until whatever supports it is restored first. Chosen over
+  permanent loss to match the "demand-driven construction" pillar and avoid
+  unwinnable states.
+- No in-game trigger exists yet (chaos events are still Phase D, not built).
+  Added a **host-only debug trigger** (Backspace, via `PlayerInteraction`)
+  so the cascade can be tested now instead of waiting on the chaos event
+  framework — explicitly a stand-in, not the intended real trigger.
 
-**Dependencies:** Build tile dependency system (partially exists), chaos event
-framework
+**Built:**
+- `BuildTile.Collapse()` — stops any in-progress build, despawns a placed
+  raw material via `MaterialItem.DestroyInCollapse()`, resets build
+  progress, sets state to `Destroyed`.
+- `BuildSystem.CascadeCollapseFrom(Vector3Int)` / `CollapseIfUnsupported` —
+  server-only, checks up + 4 horizontal neighbors against `IsEligible`.
+- `MaterialItem.DestroyInCollapse()` — despawns the raw material sitting on
+  a collapsing `MaterialPlaced` tile.
+- Red-tinted ghost visual on `Destroyed` tiles (`BuildTile.RefreshVisual`).
+- Debug-only demolish trigger + on-screen hint in `PlayerInteraction.cs`,
+  gated by `IsServer` (host-only, no RPC needed).
+- See `docs/ARCHITECTURE.md`'s "Structural Integrity / Collapse Cascade"
+  section for full detail.
+
+**Still to build:** the real trigger (chaos events, Phase D) to replace the
+debug key — the debug trigger should be removed once that lands.
+
+**Unverified:** no Unity Editor available in this environment this session —
+see `docs/SESSION.md` for the playtest checklist.
 
 ---
 

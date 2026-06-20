@@ -265,16 +265,20 @@ from `OverflowSpawnOffsets` (±3 units, X or Z) so extra players don't stack on
 an existing one. Called from `NetworkPlayer.OnActiveSceneChanged` — see Player
 section above.
 
-**Dependency rules (implemented):**
-- Foundation: no dependencies
-- Floor: needs tile below Built
-- Wall: needs tile below Built
-- Furniture: needs tile below Built
-- Decor: needs an adjacent Built tile
+**Dependency rules (implemented in `TileStructuralRules.cs`, shared by `BuildSystem`
+at runtime and the Level Editor at author-time):** type-specific pairs, not a
+uniform "needs tile below" rule --
+- Foundation: no support needed, but must rest on empty space below (base of a stack)
+- Floor, Column: supported by a Built Foundation directly below
+- Wall, Window, Door, Furniture, Column: supported by a Built Floor directly below
+- Decor: supported by a Built Wall horizontally adjacent (not below)
 
-**Not implemented:** structural integrity / collapse cascade. The
-`supportDependents` graph and Jenga-style collapse on destruction are planned but
-do not exist in code.
+(This corrects an earlier, less precise version of this section that described a
+uniform "needs tile below Built" rule for Floor/Wall/Furniture -- the actual rules
+are per-type pairs, see `TileStructuralRules.SupportsAbove`/`SupportsAdjacent`.)
+
+**Structural integrity / collapse cascade -- implemented.** See its own section
+below.
 
 **Per-material hue visuals (Part B):** `BuildTile.BaseHueFor(MaterialType)` is a
 stand-in for real per-material textures, which **do not exist yet** as assets.
@@ -287,6 +291,67 @@ pointing `ghostRenderer` at a non-transparent material, which is presumably why
 ghosts previously didn't read as ghostly) to a new `ToonTransparentGhost.mat`
 (uses `ToonTransparent.shader`, `_BaseColor` alpha 0.3) so the per-material tint
 is actually visible through transparency instead of solid-colored.
+
+---
+
+### Structural Integrity / Collapse Cascade
+
+**What it is:** When a load-bearing tile is destroyed, anything it was supporting
+collapses too, cascading Jenga-style through the structure (`GAME_INTENT.md`
+4.4, `PLANNED_FEATURES.md` "Structural Integrity / Collapse Cascade").
+
+**No precomputed `supportDependents` graph.** `TileStructuralRules.HasSupport`
+already re-derives "is this position currently supported" live from neighbor
+tile states (it's how build eligibility/ghost visuals already worked before
+this system existed). A cached reverse-edge graph would just be a second copy
+of the same information with its own staleness risk, so the cascade reuses
+`HasSupport` via `BuildSystem.IsEligible` directly instead.
+
+- **`BuildTile.Collapse()`** — server-only. Stops any in-progress build
+  coroutine, destroys whatever raw material was sitting on the tile if it was
+  `MaterialPlaced` (`MaterialItem.DestroyInCollapse()`, despawns the
+  `NetworkObject` — a `Built` tile has none, `ConsumeAsBuilt` already despawned
+  it), then sets `_state.Value = TileState.Destroyed`.
+- **`BuildSystem.CascadeCollapseFrom(Vector3Int pos)`** — called from
+  `BuildTile.OnStateChanged` (gated `IsServer`) whenever a tile's state becomes
+  `Destroyed`. Re-checks the cell above and the 4 horizontal neighbors (the
+  only positions `TileStructuralRules` lets anything depend on — support never
+  flows downward, so the cell below is never re-checked) via the new
+  `CollapseIfUnsupported`, which calls `tile.Collapse()` on any
+  `MaterialPlaced`/`Built` neighbor that's no longer `IsEligible`. Each nested
+  `Collapse()` re-enters `OnStateChanged` → `CascadeCollapseFrom` on the
+  server, so the cascade continues through the call stack with no explicit
+  recursion bookkeeping and no risk of looping (each tile transitions to
+  `Destroyed` at most once; `Collapse()` is a no-op if already `Destroyed`).
+- **Repairable.** `Destroyed` behaves like `Empty` for `CanAcceptMaterial` —
+  players can place material on a collapsed tile again, provided whatever
+  supports that position is still standing (the same `IsEligible` check governs
+  both). Decision: repairable, not permanent for the level — keeps a chaos
+  event from being able to lock completion below 100% with no recourse, in
+  line with the "demand-driven construction" pillar (work on any part of the
+  blueprint, any time, as dependencies allow).
+- **Ghost visual:** `BuildTile`'s ghost renderer now also shows (and stays
+  enabled) while `Destroyed`, tinted toward red (`destroyedRedBlend`, default
+  0.6) instead of the raw material hue, so collapsed rubble reads differently
+  from a never-built `Empty` tile at a glance.
+- **Debug-only trigger, no chaos events exist yet to drive this for real.**
+  `PlayerInteraction` gained a host-only (`IsServer`-gated) manual demolish:
+  looking at a `MaterialPlaced`/`Built` tile and pressing Backspace calls
+  `tile.Collapse()` directly (no RPC needed — the host process *is* the
+  server). An on-screen hint shows only for the host, only while targeting a
+  collapsible tile. **This is explicitly a stand-in for Phase D's chaos event
+  framework** (Termites is the planned first real trigger,
+  `PLANNED_FEATURES.md` Phase D) — remove `HandleDebugDemolish`/
+  `DrawDebugDemolishHint`/`_debugDemolishTarget` from `PlayerInteraction` once
+  a real structural chaos event can call `BuildTile.Collapse()` instead.
+- **Unverified — no Unity Editor or C# compiler available this session.** All
+  changes were hand-verified by direct read only. Please build once, then
+  playtest: destroy a load-bearing tile (e.g. a Foundation under a Floor under
+  a Wall) with the debug key and confirm the whole stack above it collapses in
+  one cascade; confirm a collapsed tile shows the red-tinted ghost and accepts
+  a fresh material placement once its own support is intact; confirm a
+  `MaterialPlaced` tile's raw material actually disappears (not left floating)
+  when the tile it's sitting on collapses.
 
 ---
 

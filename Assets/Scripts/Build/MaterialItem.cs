@@ -66,4 +66,11 @@ public class MaterialItem : NetworkBehaviour
         _state.Value = MaterialState.Built;
         NetworkObject.Despawn();
     }
+
+    /// <summary>Server-only. Called by BuildTile.Collapse() for a MaterialPlaced tile --
+    /// the raw material goes down with the tile instead of being left behind.</summary>
+    public void DestroyInCollapse()
+    {
+        NetworkObject.Despawn();
+    }
 }
