@@ -1170,3 +1170,107 @@ now that real art exists). Implemented:
   version of the asset-wiring step; Cameron's actual `WallMeshSet-Default.asset`
   supersedes it with real art directly. Per CLAUDE.md convention I haven't
   moved or edited that file — move it to `docs/wiring/done/` when convenient.
+
+## 2026-06-20 (Part F)
+
+**Context from Cameron:** "i dont want to have to manually switch layers each
+time i want to add to a new one... when a floor is added ontop of a foundation
+it automatically adjusts it for that y level... when you place a spawner or
+any objects tools or order kiosk in the level editor they default to y level
+1... i want there to be the manual or automatic versions for now and you can
+switch between both."
+
+Two related complaints: (1) manually switching Y-layers (`[`/`]` or the UI
+arrows) before every click got old fast, and (2) World Objects (spawners,
+tool depots, the order kiosk) were floating in the level editor — which
+Cameron correctly root-caused himself: "if the first part i said is
+implemented right then kiosks should not be floating at all since there is
+no manual switching of layers, it will be auto detected." That's exactly
+right — both bugs traced back to the same line, `HandleClick` resolving its
+placement plane at `CurrentLayer * CellSize` for both Tiles and WorldObjects
+modes. World Objects were never supposed to be tied to the tile layer at all.
+
+### Implementation
+
+`Assets/Scripts/LevelEditor/LevelEditorController.cs`:
+
+- New `LayerMode { Auto, Manual }` enum, `CurrentLayerMode` property
+  (defaults to `Auto`), `SetLayerMode(mode)`.
+- **Auto** (new default): tile clicks ignore `CurrentLayer` and instead scan
+  the clicked (x, z) column — place lands on the lowest empty Y
+  (`FindLowestEmptyY`), erase removes the topmost occupied Y
+  (`FindTopmostOccupiedY`). `CurrentLayer` is synced to whichever Y the click
+  touched afterward, so the grid renderer and on-layer tile dimming
+  (both of which read `CurrentLayer` directly, unchanged) stay visually
+  correct with zero changes needed in `EditorGridRenderer`. A full column
+  surfaces the existing `PlacementWarning` mechanism instead of placing.
+- **Manual**: byte-for-byte the original behavior — clicks always target
+  `CurrentLayer`. Deliberately kept as-is and exposed as a toggle (per
+  Cameron's explicit ask) rather than replaced outright, because Auto's
+  "always target the next empty slot" semantics can never land on an
+  already-placed tile — Manual is now the only way to click an existing
+  tile to select it for property editing. This is a judgment call, not a
+  GAME_INTENT-level decision, so I didn't stop to ask.
+- New `WorldObjectHeight = 1f` constant. `HandleClick` now resolves Tiles and
+  WorldObjects independently: WorldObjects always place at
+  `(x, WorldObjectHeight, z)`, full stop, never reading `CurrentLayer` or
+  `CurrentLayerMode`. This is safe because `LevelEditorCamera` is a perfectly
+  vertical orthographic top-down view — the raycast plane's Y has zero effect
+  on the resolved (x, z), so decoupling Tiles' and WorldObjects' Y resolution
+  required no change to how either resolves x/z.
+- Removed the now-dead `WorldToGridPos` (confirmed via grep it had no other
+  callers); its logic moved into the new `HandleTileClick`.
+- `PlaceOrReplace<T>`/`RemoveNearest<T>` (the click-to-replace/erase matching
+  for World Objects) switched from `Vector3.Distance` to a new
+  `HorizontalDistance` helper that ignores Y. Reasoning: a top-down click
+  can't express vertical depth anyway, and existing blueprints have World
+  Objects saved at other Y values (`blueprint_001.json`'s supply
+  zone/order station/tool depot are all at y=0.5) — without this, a click
+  that now resolves to y=1 could fail to match and replace/erase them.
+- **Did not migrate existing blueprint JSON.** `blueprint_001.json` and
+  friends keep their original World Object Y values; only the editor's
+  forward placement behavior changed. Re-saving any blueprint from the editor
+  will naturally normalize it to y=1 on next edit.
+
+`Assets/Scripts/LevelEditor/LevelEditorUI.cs`:
+
+- New "Layer Mode: Auto/Manual" toggle button in `DrawTopBar()`, next to the
+  existing layer arrows, calling `SetLayerMode`. The `[`/`]` keys and layer
+  arrows still work in both modes (in Auto, they only change which layer's
+  dimming you're viewing — the next click still auto-targets its own column
+  regardless).
+
+`docs/ARCHITECTURE.md` — added a new subsection under Level Editor
+documenting `LayerMode`/`WorldObjectHeight`/`HorizontalDistance` and the
+root-cause/fix above.
+
+### Changes made this session
+
+- `Assets/Scripts/LevelEditor/LevelEditorController.cs` — `LayerMode` enum +
+  `CurrentLayerMode`/`SetLayerMode`, `WorldObjectHeight` constant, rewrote
+  `HandleClick`/removed `WorldToGridPos` into new `HandleTileClick` +
+  `FindLowestEmptyY`/`FindTopmostOccupiedY`, `HorizontalDistance` helper used
+  in `PlaceOrReplace`/`RemoveNearest`.
+- `Assets/Scripts/LevelEditor/LevelEditorUI.cs` — Layer Mode toggle button in
+  `DrawTopBar()`.
+- `docs/ARCHITECTURE.md` — new Level Editor subsection.
+- `docs/SESSION.md` — this entry.
+
+### Open items for Cameron to review
+
+- **Not compiled or run.** No Unity Editor or C# compiler available this
+  session — please confirm it builds, then playtest: build a Foundation,
+  then a Floor on top with no manual layer switch (Auto mode, the default),
+  confirm it lands on layer 2 automatically; place a kiosk/spawner/depot and
+  confirm it no longer floats; toggle to Manual and confirm clicking an
+  existing tile still selects it for editing like before.
+- In Auto mode, erasing pops the topmost tile in a column (e.g. erase removes
+  the Floor before the Foundation under it, not whichever tile your mouse
+  happens to hover at a specific Y) — this seemed like the only sensible
+  "automatic" interpretation of erase (mirrors how you'd tear down a real
+  structure, top-down), but flag if you wanted erase to target whatever's
+  literally under your cursor's last-set layer instead.
+- Left the `[`/`]` keys and layer arrows active in both modes (rather than
+  disabling them in Auto) since they're still useful purely for *viewing* a
+  different layer's dimming. If that's confusing in practice, easy to grey
+  them out when `CurrentLayerMode == Auto`.

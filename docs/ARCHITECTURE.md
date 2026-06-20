@@ -811,6 +811,57 @@ use of that RPC target (everything else is `SendTo.Server`/`SendTo.Owner`).
 No Unity Editor/NGO package was available to compile-check it this session —
 confirm it builds.
 
+**Auto/Manual `LayerMode` + fixed World Object height (new):** Cameron didn't
+want to manually switch Y-layers (`[`/`]` keys or the UI's `◀`/`▶` buttons)
+every time he wanted to build upward, and World Objects (spawners/kiosks/
+depots/trash bins) were floating because they inherited whatever
+`CurrentLayer` a tile brush had last left set, instead of always sitting at
+ground level.
+
+- `LevelEditorController.LayerMode { Auto, Manual }`, exposed as
+  `CurrentLayerMode` (default `Auto`) + `SetLayerMode(mode)`. Toggled via a
+  new "Layer Mode: Auto/Manual" button in `LevelEditorUI.DrawTopBar()`, next
+  to the existing layer arrows.
+  - **Auto** (default): a tile click no longer targets `CurrentLayer` at
+    all. Place scans the clicked (x, z) column bottom-up for the lowest
+    empty Y and lands there (`FindLowestEmptyY`) — so a Floor placed above a
+    Foundation just stacks on top, no manual layer switch. Erase removes the
+    topmost occupied Y in that column (`FindTopmostOccupiedY`). Either way
+    `CurrentLayer` is updated afterward to match, so the grid renderer and
+    the on-layer/dimmed tile visuals stay in sync with whatever the click
+    just touched. A full column shows `PlacementWarning` ("increase Grid
+    Size Y to build higher") instead of placing.
+  - **Manual**: unchanged original behavior — tile clicks always target the
+    fixed `CurrentLayer`. Kept as the only way to click an already-placed
+    tile to select it for property editing (Auto's clicks always target the
+    next *empty* slot, so they can never land on an existing tile).
+  - The `[`/`]` keys and the UI's layer arrows still directly set
+    `CurrentLayer` in both modes (useful in Auto mode purely to *view* a
+    different layer's dimming; the next click still auto-targets its
+    column regardless of where the arrows left `CurrentLayer`).
+- `LevelEditorController.WorldObjectHeight = 1f` — every World Object now
+  always places at this fixed world Y, completely decoupled from
+  `CurrentLayer`/`LayerMode`. Root cause of the floating bug: the old
+  `HandleClick` raycasted the placement plane at `CurrentLayer * CellSize`
+  for *both* Tiles and WorldObjects modes, so a kiosk placed while
+  `CurrentLayer` was elevated (e.g. after building a Floor layer) floated at
+  that height. Fix relies on the editor camera being a perfectly vertical
+  orthographic top-down view (`LevelEditorCamera`) — the raycast plane's Y
+  has zero effect on the resolved (x, z), so Tiles and WorldObjects can each
+  resolve their own Y independently with no change to click targeting.
+  Existing saved blueprints with World Objects at other Y values (e.g.
+  `blueprint_001.json`'s stations at y=0.5) were **not migrated** — only
+  the editor's forward placement behavior changed.
+- `PlaceOrReplace<T>`/`RemoveNearest<T>`'s click-to-replace/erase matching
+  now uses a new `HorizontalDistance` helper (ignores Y) instead of
+  `Vector3.Distance`, since a top-down click can't express vertical depth
+  anyway, and this keeps existing World Objects saved at a different Y
+  (pre-`WorldObjectHeight` data) matchable by new clicks that resolve to
+  y=1.
+- **Not compiled/playtested this session** (no Unity Editor available) —
+  confirm it builds, and confirm Auto mode's stacking + the toggle button
+  behave as expected in-editor.
+
 ---
 
 ### Pause Menu

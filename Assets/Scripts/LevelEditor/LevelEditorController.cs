@@ -13,11 +13,26 @@ using UnityEngine.InputSystem;
 /// brush, and the placeholder visuals (primitive cubes/spheres -- no art needed). All
 /// mutations to Blueprint go through Commands.Run() so they're undoable.
 ///
-/// Click-to-grid-cell targeting is plain math against the current layer's horizontal
-/// plane (LevelEditorCamera.ScreenToPlane), not physics raycasting against the tile
-/// visuals -- there's no need for the visuals to carry colliders for editing input. Tile
-/// cubes keep their default BoxCollider anyway, since Preview Mode's CharacterController
-/// needs something solid to stand on/bump into.
+/// Click-to-grid-cell targeting is plain math against a horizontal plane
+/// (LevelEditorCamera.ScreenToPlane), not physics raycasting against the tile visuals --
+/// there's no need for the visuals to carry colliders for editing input. Tile cubes keep
+/// their default BoxCollider anyway, since Preview Mode's CharacterController needs
+/// something solid to stand on/bump into. The editor camera is a perfectly vertical
+/// orthographic top-down view, so a click's resolved (x, z) is the same regardless of
+/// which Y the targeting plane sits at -- only LayerMode.Manual's tile placement and
+/// LayerMode.Auto's column scan ever care about Y.
+///
+/// Layer handling has two modes (LayerMode below). Auto (the default) stacks tile
+/// placement/erase on whatever's already in that grid column -- a Floor placed above an
+/// existing Foundation just lands on top of it, no manual layer switch needed. Manual
+/// keeps the original behavior (CurrentLayer fixed until changed via SetLayer/the bracket
+/// keys/the UI buttons) for designers who want exact control over which layer a click
+/// lands on, e.g. to select an existing tile for property editing -- Auto mode's clicks
+/// always target the next empty slot in the column, so it can't select an already-placed
+/// tile. World Objects (spawners/kiosks/depots/etc.) are never tied to either mode or to
+/// CurrentLayer at all -- they always place at WorldObjectHeight, the ground/walking-
+/// surface level, so they can never end up floating at whatever Y a tile brush happened
+/// to leave CurrentLayer at.
 ///
 /// Setup: create an empty GameObject in a new "LevelEditor" scene (do not name any folder
 /// "Editor" -- Unity strips those from player builds), add this script, an
@@ -30,7 +45,19 @@ public class LevelEditorController : MonoBehaviour
     public enum EditorMode { Tiles, WorldObjects, Preview }
     public enum WorldObjectCategory { SupplyZone, OrderStation, ToolDepot, TrashBin, PlayerSpawn }
 
+    /// <summary>Auto stacks tile placement/erase on whatever's already in the clicked
+    /// column (no manual layer switching). Manual keeps CurrentLayer fixed until changed
+    /// explicitly -- needed to select an existing tile for property editing, which Auto's
+    /// always-target-the-next-empty-slot behavior can't do. See the class doc above.</summary>
+    public enum LayerMode { Auto, Manual }
+
     public const float CellSize = BuildSystem.CellSize;
+
+    /// <summary>Fixed world Y every World Object (SupplyZone/OrderStation/ToolDepot/
+    /// TrashBin/PlayerSpawn) places at, regardless of LayerMode or CurrentLayer -- the
+    /// ground/walking-surface level. Decoupling this from CurrentLayer is what stops a
+    /// spawner or kiosk from floating at whatever Y a tile brush left CurrentLayer at.</summary>
+    public const float WorldObjectHeight = 1f;
 
     /// <summary>Set in Awake -- LevelEditorBlueprintSync reaches through this to read/replace
     /// Blueprint on the one LevelEditorController instance that exists per client.</summary>
@@ -62,6 +89,7 @@ public class LevelEditorController : MonoBehaviour
     public event Action BlueprintChanged;
 
     public EditorMode Mode { get; private set; } = EditorMode.Tiles;
+    public LayerMode CurrentLayerMode { get; private set; } = LayerMode.Auto;
     public int CurrentLayer { get; private set; }
     public Vector3Int? SelectedTilePos { get; private set; }
 
@@ -134,6 +162,11 @@ public class LevelEditorController : MonoBehaviour
         RefreshAllTileVisuals();
     }
 
+    /// <summary>Switches between Auto (stack on/unstack from the clicked column) and
+    /// Manual (CurrentLayer fixed until changed explicitly) tile-layer targeting. See the
+    /// LayerMode enum doc above.</summary>
+    public void SetLayerMode(LayerMode mode) => CurrentLayerMode = mode;
+
     private void HandleLayerKeys()
     {
         var kb = Keyboard.current;
@@ -170,30 +203,74 @@ public class LevelEditorController : MonoBehaviour
 
     private void HandleClick(bool erase)
     {
-        Vector3 groundHit = editorCamera.ScreenToPlane(Mouse.current.position.ReadValue(), CurrentLayer * CellSize);
+        // The editor camera is a perfectly vertical orthographic top-down view, so the
+        // plane's Y has no effect on the resolved (x, z) -- Y=0 is just a convenient
+        // constant. Tile mode resolves its own Y below (Auto: column scan, Manual:
+        // CurrentLayer); World Objects always use the fixed WorldObjectHeight.
+        Vector3 groundHit = editorCamera.ScreenToPlane(Mouse.current.position.ReadValue(), 0f);
 
         if (Mode == EditorMode.Tiles)
         {
-            Vector3Int? gridPos = WorldToGridPos(groundHit);
-            if (gridPos == null) return;
-
-            if (erase) EraseTile(gridPos.Value);
-            else PlaceOrSelectTile(gridPos.Value);
+            HandleTileClick(groundHit, erase);
         }
         else if (Mode == EditorMode.WorldObjects)
         {
-            if (erase) EraseNearestWorldObject(groundHit);
-            else PlaceWorldObject(groundHit);
+            Vector3 worldPos = new Vector3(groundHit.x, WorldObjectHeight, groundHit.z);
+            if (erase) EraseNearestWorldObject(worldPos);
+            else PlaceWorldObject(worldPos);
         }
     }
 
-    private Vector3Int? WorldToGridPos(Vector3 worldPos)
+    private void HandleTileClick(Vector3 groundHit, bool erase)
     {
-        int gx = Mathf.FloorToInt(worldPos.x / CellSize);
-        int gz = Mathf.FloorToInt(worldPos.z / CellSize);
-        if (gx < 0 || gx >= Blueprint.GridSize.x || gz < 0 || gz >= Blueprint.GridSize.z) return null;
+        int gx = Mathf.FloorToInt(groundHit.x / CellSize);
+        int gz = Mathf.FloorToInt(groundHit.z / CellSize);
+        if (gx < 0 || gx >= Blueprint.GridSize.x || gz < 0 || gz >= Blueprint.GridSize.z) return;
 
-        return new Vector3Int(gx, CurrentLayer, gz);
+        if (CurrentLayerMode == LayerMode.Manual)
+        {
+            var pos = new Vector3Int(gx, CurrentLayer, gz);
+            if (erase) EraseTile(pos);
+            else PlaceOrSelectTile(pos);
+            return;
+        }
+
+        // Auto mode -- target whatever's already in this column instead of CurrentLayer,
+        // so building upward (or tearing down) never requires a manual layer switch.
+        if (erase)
+        {
+            int topY = FindTopmostOccupiedY(gx, gz);
+            if (topY < 0) return; // nothing in this column
+
+            EraseTile(new Vector3Int(gx, topY, gz));
+            CurrentLayer = topY;
+        }
+        else
+        {
+            int y = FindLowestEmptyY(gx, gz);
+            if (y < 0)
+            {
+                PlacementWarning = "Column is full -- increase Grid Size Y to build higher.";
+                return;
+            }
+
+            PlaceOrSelectTile(new Vector3Int(gx, y, gz));
+            CurrentLayer = y;
+        }
+    }
+
+    private int FindLowestEmptyY(int gx, int gz)
+    {
+        for (int y = 0; y < Blueprint.GridSize.y; y++)
+            if (!Blueprint.Tiles.ContainsKey(new Vector3Int(gx, y, gz))) return y;
+        return -1;
+    }
+
+    private int FindTopmostOccupiedY(int gx, int gz)
+    {
+        for (int y = Blueprint.GridSize.y - 1; y >= 0; y--)
+            if (Blueprint.Tiles.ContainsKey(new Vector3Int(gx, y, gz))) return y;
+        return -1;
     }
 
     // -------------------------------------------------------------------------
@@ -363,7 +440,7 @@ public class LevelEditorController : MonoBehaviour
         int existingIndex = -1;
         for (int i = 0; i < list.Count; i++)
         {
-            if (Vector3.Distance(getPos(list[i]), target) <= pickRadius)
+            if (HorizontalDistance(getPos(list[i]), target) <= pickRadius)
             {
                 existingIndex = i;
                 break;
@@ -420,7 +497,7 @@ public class LevelEditorController : MonoBehaviour
 
         foreach (T item in list)
         {
-            float d = Vector3.Distance(getPos(item), target);
+            float d = HorizontalDistance(getPos(item), target);
             if (d > bestDist) continue;
             bestDist = d;
             closest = item;
@@ -433,6 +510,16 @@ public class LevelEditorController : MonoBehaviour
         Commands.Run(new ActionCommand(
             execute: () => { list.Remove(closest); RefreshWorldObjectVisuals(); },
             undo: () => { list.Insert(index, closest); RefreshWorldObjectVisuals(); }));
+    }
+
+    /// <summary>Ignores Y when matching an existing World Object under a click -- a top-down
+    /// editor click can't express vertical depth anyway, and WorldObjectHeight being fixed at
+    /// 1f shouldn't make pre-existing data saved at a different Y (e.g. 0.5) unmatchable.</summary>
+    private static float HorizontalDistance(Vector3 a, Vector3 b)
+    {
+        float dx = a.x - b.x;
+        float dz = a.z - b.z;
+        return Mathf.Sqrt(dx * dx + dz * dz);
     }
 
     private static WorldPosition ToWorldPosition(Vector3 v) => new WorldPosition { x = v.x, y = v.y, z = v.z };
