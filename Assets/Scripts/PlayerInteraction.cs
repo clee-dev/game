@@ -39,6 +39,7 @@ public class PlayerInteraction : NetworkBehaviour
     private PhysicsPickup    _heldObject;
     private OrderStation     _openOrderMenuTarget;
     private LevelSelectKiosk _openKioskMenuTarget;
+    private HubTerminal      _openTerminalMenuTarget;
 
     // Reused every frame for MaterialPropertyBlock writes -- never allocate one in Update.
     private MaterialPropertyBlock _mpb;
@@ -65,9 +66,10 @@ public class PlayerInteraction : NetworkBehaviour
         PhysicsPickup    pickupTarget = hitCollider != null ? hitCollider.GetComponentInParent<PhysicsPickup>()    : null;
         OrderStation     orderTarget  = hitCollider != null ? hitCollider.GetComponentInParent<OrderStation>()     : null;
         LevelSelectKiosk kioskTarget  = hitCollider != null ? hitCollider.GetComponentInParent<LevelSelectKiosk>() : null;
+        HubTerminal      terminalTarget = hitCollider != null ? hitCollider.GetComponentInParent<HubTerminal>()   : null;
         TrashBin         trashTarget  = hitCollider != null ? hitCollider.GetComponentInParent<TrashBin>()         : null;
         LevelEditorAccessPoint editorAccessTarget = hitCollider != null ? hitCollider.GetComponentInParent<LevelEditorAccessPoint>() : null;
-        EvaluateFeedback(tileTarget, pickupTarget, orderTarget, kioskTarget, trashTarget, editorAccessTarget);
+        EvaluateFeedback(tileTarget, pickupTarget, orderTarget, kioskTarget, terminalTarget, trashTarget, editorAccessTarget);
 
         _debugDemolishTarget = IsServer && tileTarget != null &&
             (tileTarget.State == TileState.MaterialPlaced || tileTarget.State == TileState.Built)
@@ -77,13 +79,19 @@ public class PlayerInteraction : NetworkBehaviour
             CloseOrderMenu();
         if (_openKioskMenuTarget != null && _openKioskMenuTarget != kioskTarget)
             CloseKioskMenu();
+        if (_openTerminalMenuTarget != null && _openTerminalMenuTarget != terminalTarget)
+            CloseTerminalMenu();
 
-        UpdatePrompt(tileTarget, orderTarget, kioskTarget, trashTarget, editorAccessTarget);
+        if (_terminalFlashTimer > 0f) _terminalFlashTimer -= Time.deltaTime;
+
+        UpdatePrompt(tileTarget, orderTarget, kioskTarget, terminalTarget, trashTarget, editorAccessTarget);
         HandleContinuousBuild(tileTarget);
         HandleDebugDemolish();
-        HandleInteractPress(tileTarget, pickupTarget, orderTarget, kioskTarget, trashTarget, editorAccessTarget);
+        HandleInteractPress(tileTarget, pickupTarget, orderTarget, kioskTarget, terminalTarget, trashTarget, editorAccessTarget);
         HandleOrderMenuSelection();
         HandleKioskMenuSelection();
+        HandleTerminalMenuSelection();
+        HandleTerminalConfirm();
     }
 
     // -------------------------------------------------------------------------
@@ -114,7 +122,7 @@ public class PlayerInteraction : NetworkBehaviour
     private CrosshairState _crosshairState = CrosshairState.Default;
 
     private void EvaluateFeedback(BuildTile tileTarget, PhysicsPickup pickupTarget,
-        OrderStation orderTarget, LevelSelectKiosk kioskTarget, TrashBin trashTarget, LevelEditorAccessPoint editorAccessTarget)
+        OrderStation orderTarget, LevelSelectKiosk kioskTarget, HubTerminal terminalTarget, TrashBin trashTarget, LevelEditorAccessPoint editorAccessTarget)
     {
         CrosshairState newState = CrosshairState.Default;
         BuildTile ghostTarget = null;
@@ -150,7 +158,7 @@ public class PlayerInteraction : NetworkBehaviour
             newState = CrosshairState.Hover;
             outlineTarget = pickupTarget.GetComponentInChildren<Renderer>();
         }
-        else if (tileTarget != null || orderTarget != null || kioskTarget != null || trashTarget != null || editorAccessTarget != null)
+        else if (tileTarget != null || orderTarget != null || kioskTarget != null || terminalTarget != null || trashTarget != null || editorAccessTarget != null)
         {
             newState = CrosshairState.Hover;
         }
@@ -244,7 +252,7 @@ public class PlayerInteraction : NetworkBehaviour
     // Single press: pick up / place / drop
     // -------------------------------------------------------------------------
 
-    private void HandleInteractPress(BuildTile tileTarget, PhysicsPickup pickupTarget, OrderStation orderTarget, LevelSelectKiosk kioskTarget, TrashBin trashTarget, LevelEditorAccessPoint editorAccessTarget)
+    private void HandleInteractPress(BuildTile tileTarget, PhysicsPickup pickupTarget, OrderStation orderTarget, LevelSelectKiosk kioskTarget, HubTerminal terminalTarget, TrashBin trashTarget, LevelEditorAccessPoint editorAccessTarget)
     {
         if (!_input.InteractPressed) return;
         _input.ConsumeInteract();
@@ -261,6 +269,15 @@ public class PlayerInteraction : NetworkBehaviour
                 CloseKioskMenu(); // pressing E again closes the menu
             else
                 OpenKioskMenu(kioskTarget);
+            return;
+        }
+
+        if (terminalTarget != null)
+        {
+            if (_openTerminalMenuTarget == terminalTarget)
+                CloseTerminalMenu(); // pressing E again closes the menu
+            else
+                OpenTerminalMenu(terminalTarget);
             return;
         }
 
@@ -443,10 +460,86 @@ public class PlayerInteraction : NetworkBehaviour
     }
 
     // -------------------------------------------------------------------------
+    // Hub Terminal menu (blueprint picker) -- richer alternative to the Kiosk menu
+    // above. Number keys move a local "highlighted" row only -- browsing never
+    // touches the network, so any number of players can have this open and browse
+    // independently (PLANNED_FEATURES.md: "everyone can browse anytime"). A separate
+    // Enter press confirms the highlighted row and broadcasts it via
+    // HubTerminal.SelectBlueprintRpc, with no host-only gate (PLANNED_FEATURES.md:
+    // "anyone confirms"). The menu stays open after confirming -- closing is still a
+    // separate E press -- so the lock-in flash is visible and browsing can continue.
+    // -------------------------------------------------------------------------
+
+    public bool        IsTerminalMenuOpen     => _openTerminalMenuTarget != null;
+    public HubTerminal OpenTerminalMenuTarget => _openTerminalMenuTarget;
+
+    private const float TerminalFlashDuration = 1.5f;
+
+    private int   _terminalHighlightedIndex;
+    private float _terminalFlashTimer;
+
+    private void HandleTerminalMenuSelection()
+    {
+        if (_openTerminalMenuTarget == null || Keyboard.current == null) return;
+
+        int count = Mathf.Min(_openTerminalMenuTarget.OptionCount, DigitKeys.Length);
+        for (int i = 0; i < count; i++)
+        {
+            if (!Keyboard.current[DigitKeys[i]].wasPressedThisFrame) continue;
+
+            _terminalHighlightedIndex = i;
+            break;
+        }
+    }
+
+    private void HandleTerminalConfirm()
+    {
+        if (_openTerminalMenuTarget == null || Keyboard.current == null) return;
+        if (!Keyboard.current.enterKey.wasPressedThisFrame) return;
+
+        ConfirmTerminalOption(_terminalHighlightedIndex);
+    }
+
+    private void OpenTerminalMenu(HubTerminal terminal)
+    {
+        terminal.RefreshAvailableBlueprints();
+        terminal.SelectionConfirmed += OnTerminalSelectionConfirmed;
+        _openTerminalMenuTarget = terminal;
+        _terminalHighlightedIndex = 0;
+        _terminalFlashTimer = 0f;
+        if (mouseLook != null) mouseLook.SetLookEnabled(false);
+    }
+
+    /// <summary>Wire a UI Button's OnClick to this, with the option's index as its static int argument.</summary>
+    public void ConfirmTerminalOption(int index)
+    {
+        if (_openTerminalMenuTarget == null) return;
+
+        if (_openTerminalMenuTarget.IsLevelEditorOption(index))
+            _openTerminalMenuTarget.EnterLevelEditorRpc();
+        else
+            _openTerminalMenuTarget.SelectBlueprintRpc(_openTerminalMenuTarget.IdAt(index));
+    }
+
+    /// <summary>Wire a Cancel button's OnClick to this, or call it from anywhere else that should dismiss the menu.</summary>
+    public void CloseTerminalMenu()
+    {
+        if (_openTerminalMenuTarget != null)
+            _openTerminalMenuTarget.SelectionConfirmed -= OnTerminalSelectionConfirmed;
+        _openTerminalMenuTarget = null;
+        if (mouseLook != null) mouseLook.SetLookEnabled(true);
+    }
+
+    private void OnTerminalSelectionConfirmed()
+    {
+        _terminalFlashTimer = TerminalFlashDuration;
+    }
+
+    // -------------------------------------------------------------------------
     // Prompt
     // -------------------------------------------------------------------------
 
-    private void UpdatePrompt(BuildTile target, OrderStation orderTarget, LevelSelectKiosk kioskTarget, TrashBin trashTarget, LevelEditorAccessPoint editorAccessTarget)
+    private void UpdatePrompt(BuildTile target, OrderStation orderTarget, LevelSelectKiosk kioskTarget, HubTerminal terminalTarget, TrashBin trashTarget, LevelEditorAccessPoint editorAccessTarget)
     {
         if (interactPrompt == null) return;
 
@@ -461,6 +554,14 @@ public class PlayerInteraction : NetworkBehaviour
             interactPrompt.text = _openKioskMenuTarget == kioskTarget
                 ? "[1-9] Choose Level -- [E] Cancel"
                 : "[E] Select Level";
+            return;
+        }
+
+        if (terminalTarget != null)
+        {
+            interactPrompt.text = _openTerminalMenuTarget == terminalTarget
+                ? "[1-9] Highlight -- [Enter] Confirm -- [E] Cancel"
+                : "[E] Open Terminal";
             return;
         }
 
@@ -519,6 +620,7 @@ public class PlayerInteraction : NetworkBehaviour
         DrawOrderQueue();
         DrawOrderMenu();
         DrawKioskMenu();
+        DrawTerminalMenu();
         DrawDebugDemolishHint();
     }
 
@@ -637,6 +739,65 @@ public class PlayerInteraction : NetworkBehaviour
     }
 
     // -------------------------------------------------------------------------
+    // Hub Terminal menu rendering -- same Box/Label layout as the order/kiosk
+    // menus, plus a two-line-per-row detail string (tile count / materials /
+    // completion threshold) and a small top-down preview texture for whichever
+    // row is currently highlighted (HubTerminal.GetPreviewTexture).
+    // -------------------------------------------------------------------------
+
+    private const float TerminalMenuWidth        = 420f;
+    private const float TerminalDetailLineHeight = 16f;
+    private const float TerminalPreviewSize      = 96f;
+
+    private void DrawTerminalMenu()
+    {
+        if (_openTerminalMenuTarget == null) return;
+
+        int count = _openTerminalMenuTarget.OptionCount;
+        float rowHeight = MenuLineHeight + TerminalDetailLineHeight;
+        float height = MenuPadding * 2f + MenuLineHeight + rowHeight * count + TerminalPreviewSize + MenuPadding;
+        var area = new Rect(
+            Screen.width * 0.5f - TerminalMenuWidth * 0.5f,
+            Screen.height * 0.5f - height * 0.5f,
+            TerminalMenuWidth, height);
+
+        GUI.Box(area, "Hub Terminal -- Select Blueprint");
+
+        float y = area.y + MenuPadding + MenuLineHeight;
+        for (int i = 0; i < count; i++)
+        {
+            bool highlighted = i == _terminalHighlightedIndex;
+
+            GUI.color = highlighted ? Color.yellow : Color.white;
+            GUI.Label(new Rect(area.x + MenuPadding, y, TerminalMenuWidth - MenuPadding * 2f, MenuLineHeight),
+                $"{(highlighted ? ">" : " ")} [{i + 1}] {_openTerminalMenuTarget.DescribeOption(i)}");
+            y += MenuLineHeight;
+
+            GUI.color = Color.gray;
+            GUI.Label(new Rect(area.x + MenuPadding + 16f, y, TerminalMenuWidth - MenuPadding * 2f - 16f, TerminalDetailLineHeight),
+                _openTerminalMenuTarget.DescribeDetails(i));
+            y += TerminalDetailLineHeight;
+        }
+        GUI.color = Color.white;
+
+        Texture2D preview = _openTerminalMenuTarget.GetPreviewTexture(_terminalHighlightedIndex);
+        var previewRect = new Rect(
+            area.x + TerminalMenuWidth * 0.5f - TerminalPreviewSize * 0.5f,
+            y + MenuPadding, TerminalPreviewSize, TerminalPreviewSize);
+        if (preview != null)
+            GUI.DrawTexture(previewRect, preview);
+        else
+            GUI.Box(previewRect, "");
+
+        if (_terminalFlashTimer > 0f)
+        {
+            GUI.color = Color.green;
+            GUI.Label(new Rect(area.x, area.y - 22f, TerminalMenuWidth, 20f), "Selection confirmed!");
+            GUI.color = Color.white;
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Delivery queue -- top-right list of incoming orders (Systems Architecture,
     // Section 5.3). Shared across the team, not per-player, so it reads straight
     // from OrderQueueSystem's replicated list rather than tracking anything locally.
@@ -680,5 +841,11 @@ public class PlayerInteraction : NetworkBehaviour
 
         ClearGhostTint();
         ClearOutlineHighlight();
+
+        // Unsubscribes from HubTerminal.SelectionConfirmed if this player disconnects
+        // while the terminal menu is open -- otherwise the terminal would hold a
+        // dangling delegate reference to this destroyed component indefinitely.
+        if (_openTerminalMenuTarget != null)
+            _openTerminalMenuTarget.SelectionConfirmed -= OnTerminalSelectionConfirmed;
     }
 }

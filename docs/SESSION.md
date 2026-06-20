@@ -1274,3 +1274,124 @@ root-cause/fix above.
   disabling them in Auto) since they're still useful purely for *viewing* a
   different layer's dimming. If that's confusing in practice, easy to grey
   them out when `CurrentLayerMode == Auto`.
+
+---
+
+## 2026-06-20 (Part G)
+
+**Context from Cameron:** "see my claude.md file, implement the next feature."
+Picked the next item off `docs/PLANNED_FEATURES.md`'s backlog: **Hub Terminal
+(Blueprint Selector)**, the richer replacement UI for `LevelSelectKiosk`'s
+`OnGUI` numbered list. Before implementing, asked Cameron the three open
+questions the doc left unresolved:
+
+- Confirmation rights → **host selects, anyone confirms** (no host gate, same
+  as `LevelSelectKiosk` already had).
+- Browsing → **anyone can browse anytime**, independent of confirming.
+- Visual preview → **yes**, a simple top-down tile-color preview.
+
+### Implementation
+
+`Assets/Scripts/Blueprint/TileTypeColors.cs` (new) — extracted
+`LevelEditorController`'s previously-private `TileType -> Color` dict into a
+shared static `ColorFor(TileType)` lookup, so the Level Editor's placeholder
+cubes and the new terminal preview both read from one source of truth.
+`LevelEditorController` updated to call it instead of its own copy.
+
+`Assets/Scripts/Build/HubTerminal.cs` (new) — `NetworkObject`,
+`NetworkVariable<FixedString64Bytes> _selectedBlueprintId` (Everyone-read /
+Server-write), same `SelectBlueprintRpc`/`EnterLevelEditorRpc` pattern as
+`LevelSelectKiosk`. Adds per-row `DescribeDetails` (tile count / required
+materials / completion threshold) and `GetPreviewTexture(int)` — a small
+procedural `Texture2D` per blueprint, cropped to the blueprint's actual tile
+(x, z) bounding box (not its nominal `gridSize`, since existing blueprints
+all declare 10x3x10 but only occupy a handful of tiles), flattened to the
+topmost tile per column (`position.y` is a layer index, not world height),
+painted via `TileTypeColors`, capped at 48px, cached per blueprint id.
+
+**Browse/confirm split**, to reconcile "anyone browses anytime" with a
+single synced selection: `PlayerInteraction` keeps highlighting fully local
+(number keys 1-9 move `_terminalHighlightedIndex`, no network call) and only
+`Enter` fires the RPC. The menu stays open after confirming (unlike
+`LevelSelectKiosk`, which closes) so `SelectionConfirmed`'s brief green
+flash is actually visible.
+
+**Rendering deviation — flagging for review.** `PLANNED_FEATURES.md`
+describes a world-space Canvas UI. Every existing in-game menu in this
+codebase (`DrawKioskMenu`, `DrawOrderMenu`, the delivery queue, the
+crosshair) turned out to be immediate-mode `OnGUI()` instead — there's no
+EventSystem/PhysicsRaycaster plumbing anywhere for world-space UI
+raycasting. Building that for one terminal would be a much bigger change
+than this feature calls for, so `HubTerminal`'s menu follows the established
+`OnGUI()` convention (`PlayerInteraction.DrawTerminalMenu()`,
+`GUI.DrawTexture` for the preview) instead of the doc's literal description.
+**This is a judgment call, not a confirmed design decision — please tell me
+if you actually want the world-space version and I'll redo it.**
+
+`Assets/Scripts/PlayerInteraction.cs` — added terminal raycast detection,
+`HandleTerminalMenuSelection`/`HandleTerminalConfirm`/`OpenTerminalMenu`/
+`CloseTerminalMenu`/`ConfirmTerminalOption`, the `DrawTerminalMenu()` OnGUI
+section, and prompt text (`"[1-9] Highlight -- [Enter] Confirm -- [E]
+Cancel"` while open, `"[E] Open Terminal"` otherwise). Confirmed via grep
+that Enter and the number keys weren't already bound to anything else.
+
+`Assets/Scenes/Hub.unity` — hand-authored a new `HubTerminal` GameObject
+(`NetworkObject` + `BoxCollider` + `HubTerminal` MonoBehaviour + a child
+`Cube` mesh tinted with `Blue.mat`, for visual distinction from
+`LevelSelectKiosk`'s yellow `Cylinder`) as Force-Text YAML, same pattern
+used for `LevelTimer`/`TimerCanvas`/`SummaryCanvas` in `Game1.unity` two
+sessions ago. Fresh fileIDs in the `5400000` range, a fresh
+`GlobalObjectIdHash`, both checked for zero collisions against the rest of
+the file; added the new root `Transform`'s fileID to `SceneRoots.m_Roots`
+(missing this would leave the object orphaned from the scene's root list).
+Placed at `(-1.159, 1.181, -15.311)` — same build/launch area as
+`LevelSelectKiosk` (`-1.159, 1.181, -19.311`) and `LevelEditorAccessPoint`
+(`2, 0.5, -22`), offset 4m along Z into space confirmed clear of any other
+object, so it reads as a second, more discoverable terminal rather than
+crowding either existing fixture. `LevelSelectKiosk` itself is untouched,
+left in place as the documented fallback.
+
+`docs/ARCHITECTURE.md` — new "Hub Terminal" section under "Hub
+Blueprint-Select-and-Start Flow"; also fixed a stale "Known Gaps vs Design
+Docs" entry that still listed "Structural integrity / collapse cascade" as
+not-yet-built when it was fully implemented in Part C/D of this same day —
+removed from the gaps list.
+
+`docs/PLANNED_FEATURES.md` — marked Hub Terminal built, recorded the three
+resolved decisions, noted the `OnGUI` deviation.
+
+### Changes made this session
+
+- `Assets/Scripts/Blueprint/TileTypeColors.cs` (new) + `.meta` (hand-authored,
+  no Unity Editor available).
+- `Assets/Scripts/Build/HubTerminal.cs` (new) + `.meta` (hand-authored).
+- `Assets/Scripts/LevelEditor/LevelEditorController.cs` — use
+  `TileTypeColors.ColorFor` instead of its own private dict.
+- `Assets/Scripts/PlayerInteraction.cs` — Hub Terminal menu/input/rendering.
+- `Assets/Scenes/Hub.unity` — new `HubTerminal` GameObject + child `Cube`,
+  added to `SceneRoots.m_Roots`. Verified zero duplicate fileIDs afterward.
+- `docs/ARCHITECTURE.md` — new Hub Terminal section, fixed stale collapse-
+  cascade gap entry.
+- `docs/PLANNED_FEATURES.md` — Hub Terminal marked built.
+- `docs/SESSION.md` — this entry.
+
+### Open items for Cameron to review
+
+- **Not compiled or run, and no Unity Editor available this session.** All
+  C# changes were hand-verified by direct read only; the `Hub.unity` edit was
+  hand-authored YAML, verified only by grep (zero duplicate fileIDs, all
+  internal `fileID` cross-references consistent). Please open `Hub.unity`
+  once and confirm Unity accepts the new `GlobalObjectIdHash` without
+  flagging it, then playtest: open the terminal (E), browse with 1-9,
+  confirm with Enter, confirm the green flash appears and the selection
+  syncs to other clients, and check the preview shows recognizable colors
+  for a blueprint with more than one tile type.
+- **Please weigh in on the `OnGUI` vs. world-space Canvas deviation above** —
+  I judged matching the existing convention was the right call given how
+  much new plumbing a world-space terminal would need, but the design doc
+  was explicit about "world-space UI" and I don't want to have quietly
+  dropped that without your sign-off.
+- `HubTerminal`'s in-scene position/material (Blue Cube) were my own picks
+  to keep it visually distinct from `LevelSelectKiosk` (yellow Cylinder) and
+  clear of existing geometry — not a documented design decision, easy to
+  move/reskin if you want something else.
