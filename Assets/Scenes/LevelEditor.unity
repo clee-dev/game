@@ -423,6 +423,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::LevelEditorController
   editorCamera: {fileID: 870870510}
   pauseCanvas: {fileID: 760655022}
+  wallMeshSet: {fileID: 11400000, guid: 13e547d4891501c4b8f7bb92a8a57184, type: 2}
   BrushTileType: 0
   BrushMaterial: 0
   BrushTool: 0

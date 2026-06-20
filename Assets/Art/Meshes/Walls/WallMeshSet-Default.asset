@@ -16,5 +16,5 @@ MonoBehaviour:
   endCapMesh: {fileID: -8462722074795160706, guid: 7302deb6eac64d3439c4bc330e472723, type: 3}
   straightMesh: {fileID: -6281424698479989189, guid: 8080220e216aafc4498e9fd8a0c09dc5, type: 3}
   cornerMesh: {fileID: 2915442543378831615, guid: 178d7ec46001a7c4fa7335f184b7e3c0, type: 3}
-  tJunctionMesh: {fileID: -6281424698479989189, guid: 97c7b03b0d7681a4892115443eb37361, type: 3}
-  crossMesh: {fileID: -4304378537825741212, guid: 77e84b3a9f1449842a1b6353474e2455, type: 3}
+  tJunctionMesh: {fileID: -8224564615921102898, guid: 97c7b03b0d7681a4892115443eb37361, type: 3}
+  crossMesh: {fileID: -9022881589607930681, guid: 77e84b3a9f1449842a1b6353474e2455, type: 3}
