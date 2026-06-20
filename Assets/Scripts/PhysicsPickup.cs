@@ -26,6 +26,13 @@ public class PhysicsPickup : NetworkBehaviour
     /// <summary>Fires on every machine whenever the held state changes (true = now held).</summary>
     public event Action<bool> HeldStateChanged;
 
+    // Anything that clips through a gap in the level (a missing collider, a thrown item
+    // that tunnels through thin geometry, etc.) just falls forever otherwise -- that's a
+    // permanent, invisible slot eaten out of the material cap and a potential softlock if
+    // it was a tool. -40 is well below any blueprint's playable floor.
+    [Tooltip("Despawned automatically once it falls below this Y, server-side only.")]
+    [SerializeField] private float fallDespawnY = -40f;
+
     private void Awake()
     {
         _rb = GetComponent<Rigidbody>();
@@ -50,6 +57,14 @@ public class PhysicsPickup : NetworkBehaviour
         // Non-kinematic when free so physics runs normally.
         _rb.isKinematic = isNowHeld;
         HeldStateChanged?.Invoke(isNowHeld);
+    }
+
+    private void Update()
+    {
+        if (!IsServer || !IsSpawned) return;
+        if (transform.position.y >= fallDespawnY) return;
+
+        NetworkObject.Despawn();
     }
 
     /// <summary>

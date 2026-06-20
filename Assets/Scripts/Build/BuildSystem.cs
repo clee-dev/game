@@ -22,7 +22,10 @@ using UnityEngine;
 /// itself (fine for the MVP's single material). Tool depots are the exception --
 /// toolDepotSpawnerPrefab needs every ToolItem type assigned in its toolPrefabs array,
 /// and SpawnFromBlueprint() calls Configure(depot.tools) on each instance so depots
-/// can offer different tool subsets per the blueprint's ToolDepotData.tools.
+/// can offer different tool subsets per the blueprint's ToolDepotData.tools. trashBinPrefab
+/// is the same shape as orderStationPrefab (also a NetworkObject, since deleting a held
+/// item is a client-to-server RPC); its blueprint array is null-guarded since trashBins
+/// is a newer schema field that older saved blueprints won't have.
 /// </summary>
 public class BuildSystem : MonoBehaviour
 {
@@ -43,6 +46,7 @@ public class BuildSystem : MonoBehaviour
     [SerializeField] private SupplyZoneSpawner supplyZoneSpawnerPrefab;
     [SerializeField] private ToolDepotSpawner toolDepotSpawnerPrefab;
     [SerializeField] private OrderStation orderStationPrefab;
+    [SerializeField] private TrashBin trashBinPrefab;
 
     public BlueprintData CurrentBlueprint { get; private set; }
 
@@ -138,6 +142,16 @@ public class BuildSystem : MonoBehaviour
         foreach (OrderStationData station in CurrentBlueprint.orderStations)
         {
             var instance = Instantiate(orderStationPrefab, station.worldPosition.ToVector3(), Quaternion.identity);
+            var netObj = instance.GetComponent<NetworkObject>();
+            netObj.Spawn();
+            netObj.DestroyWithScene = true;
+        }
+
+        // Null-guarded unlike the loops above -- trashBins is a newer schema field absent
+        // from blueprints saved before it existed, so a missing array must not throw.
+        foreach (TrashBinData bin in CurrentBlueprint.trashBins ?? System.Array.Empty<TrashBinData>())
+        {
+            var instance = Instantiate(trashBinPrefab, bin.worldPosition.ToVector3(), Quaternion.identity);
             var netObj = instance.GetComponent<NetworkObject>();
             netObj.Spawn();
             netObj.DestroyWithScene = true;
