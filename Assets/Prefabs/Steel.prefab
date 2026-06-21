@@ -112,6 +112,74 @@ BoxCollider:
   serializedVersion: 3
   m_Size: {x: 1, y: 1, z: 1}
   m_Center: {x: 0, y: 0, z: 0}
+--- !u!1 &7116985581762668373
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 8579367819615365154}
+  - component: {fileID: 6048527579008453165}
+  - component: {fileID: 1718135563881588624}
+  m_Layer: 0
+  m_Name: Point2
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &8579367819615365154
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7116985581762668373}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -0.445, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1238642008587050208}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!65 &6048527579008453165
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7116985581762668373}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 0.4, y: 1, z: 1}
+  m_Center: {x: 0, y: 0, z: 0}
+--- !u!114 &1718135563881588624
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7116985581762668373}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 99a29339b4724c84a8c00e51be0c1653, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TwoPersonCarryPoint
+  carry: {fileID: 6450561593080394579}
+  pointIndex: 1
 --- !u!1 &8421532194043222775
 GameObject:
   m_ObjectHideFlags: 0
@@ -150,6 +218,7 @@ Transform:
   m_Children:
   - {fileID: 2914214584462154355}
   - {fileID: 6952997645249675000}
+  - {fileID: 8579367819615365154}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!54 &5194583801629950733
@@ -315,6 +384,7 @@ MonoBehaviour:
   ShowTopMostFoldoutHeaderGroup: 1
   forwardOffset: 0.6
   heightOffset: 1.2
+  maxShareDistance: 4
 --- !u!1 &8953486007329550438
 GameObject:
   m_ObjectHideFlags: 0
@@ -327,7 +397,7 @@ GameObject:
   - component: {fileID: 1066885205410484118}
   - component: {fileID: 1309967640936462084}
   m_Layer: 0
-  m_Name: GameObject
+  m_Name: Point1
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -367,7 +437,7 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 0.31, y: 1, z: 1}
+  m_Size: {x: 0.4, y: 1, z: 1}
   m_Center: {x: 0, y: 0, z: 0}
 --- !u!114 &1309967640936462084
 MonoBehaviour:
@@ -382,3 +452,4 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TwoPersonCarryPoint
   carry: {fileID: 6450561593080394579}
+  pointIndex: 0
