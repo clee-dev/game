@@ -42,13 +42,16 @@ public class PlayerInteraction : NetworkBehaviour
     private HubTerminal      _openTerminalMenuTarget;
 
     /// <summary>Read by PlayerController to apply the held item's weight-class speed
-    /// penalty. Null for a player currently bound as a secondary carrier (see
-    /// _boundCarry) -- that's intentional, since shared carry has no penalty anyway.</summary>
+    /// penalty. Null for a player currently bound as the non-owner carrier of a shared
+    /// TwoPersonCarry (see _boundCarry) -- that's intentional, since shared carry has no
+    /// penalty anyway.</summary>
     public PhysicsPickup HeldObject => _heldObject;
 
-    // Set when this player has bound in as the *secondary* carrier of a TwoPersonCarry
-    // item (e.g. grabbed a SteelBeam's attach point while someone else already holds it).
-    // Distinct from _heldObject: the secondary never becomes the PhysicsPickup's owner.
+    // Set when this player has bound into a TwoPersonCarry point without becoming the
+    // PhysicsPickup owner -- i.e. someone else already held the item when this player
+    // grabbed its other attach point. Distinct from _heldObject: a handoff (the owner
+    // releasing while shared) promotes this player to owner via ReconcileCarryHandoff,
+    // at which point _boundCarry clears and _heldObject takes over.
     private TwoPersonCarry _boundCarry;
 
     // Reused every frame for MaterialPropertyBlock writes -- never allocate one in Update.
@@ -66,6 +69,7 @@ public class PlayerInteraction : NetworkBehaviour
     {
         if (!IsOwner) return;
 
+        ReconcileCarryHandoff();
         MoveHeldObject();
 
         Physics.Raycast(new Ray(playerCamera.transform.position, playerCamera.transform.forward),
@@ -166,12 +170,12 @@ public class PlayerInteraction : NetworkBehaviour
             // the crosshair just needs to signal "yes, you can start" beforehand.
             newState = tool != null && tileTarget.CanBuild(tool.Type) ? CrosshairState.Build : CrosshairState.Hover;
         }
-        else if (pickupTarget != null && !pickupTarget.IsHeld)
+        else if (pickupTarget != null && !pickupTarget.IsHeld && pickupTarget.GetComponent<TwoPersonCarry>() == null)
         {
             newState = CrosshairState.Hover;
             outlineTarget = pickupTarget.GetComponentInChildren<Renderer>();
         }
-        else if (attachTarget != null && _heldObject == null && _boundCarry == null && attachTarget.Carry.CanBind(OwnerClientId))
+        else if (attachTarget != null && _heldObject == null && _boundCarry == null && attachTarget.Carry.CanBind(OwnerClientId, attachTarget.PointIndex))
         {
             newState = CrosshairState.Hover;
             outlineTarget = attachTarget.GetComponentInChildren<Renderer>();
@@ -248,20 +252,27 @@ public class PlayerInteraction : NetworkBehaviour
         if (_heldObject == null) return;
 
         // Shared carry (TwoPersonCarry.IsShared): average both carriers' body-root-derived
-        // carry points instead of snapping to our own holdPoint. We're the primary here
-        // (the secondary never sets _heldObject), and as the PhysicsPickup's NetworkObject
-        // owner we're the only one whose ClientNetworkTransform write actually replicates --
-        // so this still has to run on our machine even though half the input is the other
-        // player's transform.
+        // carry points instead of snapping to our own holdPoint. We're the owner here (the
+        // other holder never sets _heldObject -- see _boundCarry), and as the PhysicsPickup's
+        // NetworkObject owner we're the only one whose ClientNetworkTransform write actually
+        // replicates -- so this still has to run on our machine even though half the input
+        // is the other player's transform.
         var carry = _heldObject.GetComponent<TwoPersonCarry>();
         if (carry != null && carry.IsShared)
         {
-            Transform secondaryBody = GetCarrierBodyTransform(carry.SecondaryHolderId);
-            if (secondaryBody != null)
+            Transform otherBody = TwoPersonCarry.GetCarrierBodyTransform(carry.OtherHolder(OwnerClientId));
+            if (otherBody != null)
             {
-                Vector3 midpoint = (carry.CarryPointFor(transform) + carry.CarryPointFor(secondaryBody)) * 0.5f;
-                Vector3 facing = transform.forward + secondaryBody.forward;
-                Quaternion rotation = facing.sqrMagnitude > 0.0001f ? Quaternion.LookRotation(facing) : transform.rotation;
+                Vector3 midpoint = (carry.CarryPointFor(transform) + carry.CarryPointFor(otherBody)) * 0.5f;
+
+                // Orientation comes from the line between the two carriers' raw body
+                // positions, never from either carrier's forward/facing vector -- stable
+                // while either player turns their view in place (PlayerCamera rotates the
+                // body on mouse-look yaw independent of movement), unlike the old
+                // forward-vector-sum approach which spun the held item with the camera.
+                Vector3 axis = otherBody.position - transform.position;
+                axis.y = 0f;
+                Quaternion rotation = axis.sqrMagnitude > 0.0001f ? Quaternion.LookRotation(axis) : _heldObject.transform.rotation;
                 _heldObject.transform.SetPositionAndRotation(midpoint, rotation);
                 return;
             }
@@ -272,14 +283,16 @@ public class PlayerInteraction : NetworkBehaviour
         _heldObject.transform.SetPositionAndRotation(holdPoint.position, holdPoint.rotation);
     }
 
-    /// <summary>Body-root transform of another connected player, by client ID -- reliable
-    /// to read from any machine (position + horizontal rotation replicate via
-    /// ClientNetworkTransform), unlike that player's camera/holdPoint (see TwoPersonCarry
-    /// remarks). Null if that client has no spawned player object right now.</summary>
-    private static Transform GetCarrierBodyTransform(ulong clientId)
+    /// <summary>Promotes a bound co-carrier to full holder after an ownership handoff (the
+    /// previous owner released while shared -- see TwoPersonCarry.TryHandoffOnOwnerRelease).
+    /// Without this, _heldObject would stay null forever on the newly-promoted client since
+    /// nothing else sets it, and MoveHeldObject would never run for them again.</summary>
+    private void ReconcileCarryHandoff()
     {
-        NetworkObject playerObj = NetworkManager.Singleton.SpawnManager.GetPlayerNetworkObject(clientId);
-        return playerObj != null ? playerObj.transform : null;
+        if (_boundCarry == null || _boundCarry.Pickup.OwnerClientId != OwnerClientId) return;
+
+        _heldObject = _boundCarry.Pickup;
+        _boundCarry = null;
     }
 
     // -------------------------------------------------------------------------
@@ -303,32 +316,45 @@ public class PlayerInteraction : NetworkBehaviour
     }
 
     // -------------------------------------------------------------------------
-    // Two-player carry binding (Section: Steel Material, PLANNED_FEATURES.md). A second
-    // player binds in by interacting with a TwoPersonCarryPoint on a Heavy item someone
-    // else is already carrying. Checked ahead of the main press dispatch below so it can
-    // consume the press itself -- the normal pickup/place/drop flow never sees it.
+    // Two-player carry binding (Section: Steel Material, PLANNED_FEATURES.md). Either
+    // player can bind in via either of a Heavy item's two interchangeable
+    // TwoPersonCarryPoints -- whichever point is grabbed first (while unheld) is a normal
+    // solo pickup, and a second player grabbing the other point afterward makes it shared.
+    // Checked ahead of the main press dispatch below so it can consume the press itself --
+    // the normal pickup/place/drop flow never sees it.
     // -------------------------------------------------------------------------
 
     private void HandleCarryBinding(TwoPersonCarryPoint attachTarget)
     {
         if (!_input.InteractPressed) return;
 
-        // Already bound as a secondary carrier -- E always releases that binding first,
-        // regardless of where the player is currently looking (hands are full either way).
+        // Already bound as the non-owner holder of a shared carry -- E always releases that
+        // binding first, regardless of where the player is currently looking (hands are
+        // full either way). Releasing as the *owner* goes through Drop() instead, since
+        // that needs PhysicsPickup's full throw/handoff flow, not a plain unbind.
         if (_boundCarry != null)
         {
             _input.ConsumeInteract();
-            _boundCarry.RequestUnbindSecondaryRpc(OwnerClientId);
+            _boundCarry.RequestUnbindRpc(OwnerClientId);
             _boundCarry = null;
             return;
         }
 
         if (attachTarget == null || _heldObject != null) return;
-        if (!attachTarget.Carry.CanBind(OwnerClientId)) return;
+
+        TwoPersonCarry carry = attachTarget.Carry;
+        if (!carry.CanBind(OwnerClientId, attachTarget.PointIndex)) return;
 
         _input.ConsumeInteract();
-        attachTarget.Carry.RequestBindSecondaryRpc(OwnerClientId);
-        _boundCarry = attachTarget.Carry;
+        bool startingSolo = !carry.IsHeldByAnyone;
+        carry.RequestBindRpc(OwnerClientId, attachTarget.PointIndex);
+
+        // Grabbing the first (unclaimed) point on an unheld item is a normal pickup -- we
+        // become the owner and drive it solo. Grabbing the second point on an item someone
+        // else already holds makes us the non-owner shared carrier instead; ownership never
+        // changes on that bind (see TwoPersonCarry remarks).
+        if (startingSolo) _heldObject = carry.Pickup;
+        else _boundCarry = carry;
     }
 
     // -------------------------------------------------------------------------
@@ -405,6 +431,10 @@ public class PlayerInteraction : NetworkBehaviour
     private void TryPickup(PhysicsPickup pickupTarget)
     {
         if (pickupTarget == null || pickupTarget.IsHeld) return;
+
+        // TwoPersonCarry items must be picked up via one of their attach points
+        // (HandleCarryBinding), not the generic body collider.
+        if (pickupTarget.GetComponent<TwoPersonCarry>() != null) return;
 
         // Request ownership transfer from the host
         pickupTarget.RequestPickupServerRpc(OwnerClientId);
@@ -633,9 +663,9 @@ public class PlayerInteraction : NetworkBehaviour
             return;
         }
 
-        if (attachTarget != null && _heldObject == null && attachTarget.Carry.CanBind(OwnerClientId))
+        if (attachTarget != null && _heldObject == null && attachTarget.Carry.CanBind(OwnerClientId, attachTarget.PointIndex))
         {
-            interactPrompt.text = "[E] Help Carry";
+            interactPrompt.text = attachTarget.Carry.IsHeldByAnyone ? "[E] Help Carry" : "[E] Pick Up";
             return;
         }
 
@@ -964,10 +994,10 @@ public class PlayerInteraction : NetworkBehaviour
         if (_heldObject != null && IsServer)
             _heldObject.RequestDropServerRpc(Vector3.zero);
 
-        // Likewise, release a secondary carry binding so the primary doesn't stay stuck
+        // Likewise, release a non-owner carry binding so the owner doesn't stay stuck
         // "shared" (and penalty-free) with a carrier who's no longer there.
         if (_boundCarry != null && IsServer)
-            _boundCarry.RequestUnbindSecondaryRpc(OwnerClientId);
+            _boundCarry.RequestUnbindRpc(OwnerClientId);
 
         ClearGhostTint();
         ClearOutlineHighlight();

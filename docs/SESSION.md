@@ -1537,3 +1537,124 @@ need to ship side by side.
   `WeldingTorchFuel` on `Welding Torch.prefab`, `playerInteraction` on
   `Player.prefab`, blueprint content) is laid out step by step in
   `docs/wiring/steel-material-and-welding-torch.md`.
+
+---
+
+## 2026-06-21 (later same day) — Two-Person Carry: rotation/distance fixes + symmetric redesign
+
+**Context from Cameron:** playtested the steel two-player carry from earlier today and
+reported three issues: "when one player rotates and nobody is moving, the steel also
+rotates," "there is no drop off distance so you can hold it forever," and a redesign
+request — "either player can hold from either point, there is no specific hold point for
+the second player... follow how other games implement this."
+
+### What changed
+
+**Rotation jank (bug, fixed).** `PlayerInteraction.MoveHeldObject()`'s shared-carry branch
+used to set the held item's rotation from `Quaternion.LookRotation(transform.forward +
+secondaryBody.forward)` — both carriers' *facing* direction. `PlayerCamera.Update()` rotates
+the player body directly on mouse-look yaw, fully decoupled from movement input, so turning
+your view while standing still changed `transform.forward` and visibly spun the beam. Fixed
+by deriving rotation from the **line between the two carriers' raw body positions** instead
+(`axis = otherBody.position - transform.position`, flattened via `axis.y = 0`) — stable
+under pure look-rotation since neither carrier's position changes just because they turn
+their head. This is the standard fix for stretcher/log-carry mechanics in other co-op
+games: orient off the line connecting the two carry points, never off either carrier's
+heading.
+
+**No max carry distance (bug, fixed).** Nothing previously capped how far apart the two
+carriers could drift while sharing. `TwoPersonCarry` now runs a server-only `Update()` while
+`IsShared`, comparing both carriers' body positions against a new `maxShareDistance`
+(`[SerializeField]`, default 4) and auto-clearing the non-owner's slot if they exceed it —
+the owner keeps carrying solo (and regains the weight penalty); the other player just "lets
+go" with no explicit input.
+
+**Symmetric two-point redesign.** Replaced the fixed primary (generic body-collider pickup)
++ secondary (one dedicated `TwoPersonCarryPoint`) split with two fully interchangeable
+`TwoPersonCarryPoint`s (`pointIndex` 0/1, no fixed role). Generic body-collider pickup is
+now refused outright for any item with a `TwoPersonCarry` component (`PlayerInteraction.
+TryPickup` and the `EvaluateFeedback` hover-outline branch both check for it and bail) —
+every grab goes through an attach point. Whichever point is grabbed first (while the item
+is unheld) is a normal solo pickup (claims `PhysicsPickup` ownership via the new
+`PhysicsPickup.ClaimServer`); a second player grabbing the *other* point afterward binds in
+as a non-owner shared carrier without touching ownership. `TwoPersonCarry.CanBind(clientId,
+pointIndex)` covers both cases in one check. Prompt text now reads `[E] Pick Up` for the
+first case and `[E] Help Carry` for the second.
+
+`TwoPersonCarry`'s single `_secondaryHolderId` became two symmetric NetworkVariable slots
+(`_holderA`/`_holderB`); `RequestBindSecondaryRpc`/`RequestUnbindSecondaryRpc` became
+`RequestBindRpc(clientId, pointIndex)`/`RequestUnbindRpc(clientId)`;
+`TryHandoffToSecondary()` became `TryHandoffOnOwnerRelease(outgoingOwnerClientId)`, now
+correctly resolving "the other holder" symmetrically instead of a fixed secondary id.
+`PhysicsPickup` gained `ClaimServer`/`ReleaseServer` (the actual claim/release logic,
+factored out of `RequestPickupServerRpc`/`RequestDropServerRpc` so `TwoPersonCarry` can
+reuse them) and now rejects `RequestPickupServerRpc` outright for any item with a
+`TwoPersonCarry` (defense in depth alongside the client-side `TryPickup` guard).
+
+**Ownership-handoff reconciliation (bug found and fixed, not reported by Cameron).** While
+rewriting the bind/unbind plumbing, found that a handoff (the owner releasing while shared)
+transferred `NetworkObject` ownership but never reconciled the newly-promoted owner's local
+`PlayerInteraction._heldObject`/`_boundCarry` fields — nothing else ever set `_heldObject`
+for them, so `MoveHeldObject()` would never run again on their machine and the item would
+freeze in place mid-air despite them now owning it. Fixed with a new
+`ReconcileCarryHandoff()`, called every `Update()` before `MoveHeldObject()`: if
+`_boundCarry != null` and `_boundCarry.Pickup.OwnerClientId` now equals this player's own
+`OwnerClientId`, promote `_heldObject = _boundCarry.Pickup` and clear `_boundCarry`.
+
+**Other implementations considered, not used:** proximity-based binding (no dedicated
+collider, just "close enough to the carrier") — rejected, keeps the existing
+raycast+interact-prompt pattern every other interactable in this game already uses, and
+the user's framing ("either player can pick up the object from either hold point") already
+implied dedicated points, just made symmetric. A true rigid two-body physics joint
+(`ConfigurableJoint` between both players) was not considered — `ClientNetworkTransform`'s
+single-writer-authority model (`Authority Mode = Owner`) makes any physics-engine-driven
+two-writer joint a much larger architectural change than this feature warrants; the
+position-averaging approach already in place is consistent with how every other held-object
+in this codebase is driven.
+
+### Changes made this session
+
+- `Assets/Scripts/TwoPersonCarry.cs` — full rewrite: symmetric `_holderA`/`_holderB`,
+  `HolderAt`/`IsHolder`/`OtherHolder`/`CanBind` (pointIndex-aware), `RequestBindRpc`/
+  `RequestUnbindRpc`/`ClearHolderServer`/`TryHandoffOnOwnerRelease`, server-only `Update()`
+  for `maxShareDistance` auto-release, `GetCarrierBodyTransform` moved here as `public
+  static` (was a private helper in `PlayerInteraction`).
+- `Assets/Scripts/TwoPersonCarryPoint.cs` — added `pointIndex` field/property.
+- `Assets/Scripts/PhysicsPickup.cs` — added `ClaimServer`/`ReleaseServer`; refactored
+  `RequestPickupServerRpc` (now also rejects `TwoPersonCarry` items) and
+  `RequestDropServerRpc` (now calls `TryHandoffOnOwnerRelease` + `ClearHolderServer`) to use
+  them.
+- `Assets/Scripts/PlayerInteraction.cs` — rewrote `HandleCarryBinding` (symmetric bind/
+  unbind), `MoveHeldObject` (position-based rotation, no more forward-vector sum), added
+  `ReconcileCarryHandoff` (new, called from `Update()`); updated `TryPickup`,
+  `EvaluateFeedback`, `UpdatePrompt`, `OnNetworkDespawn` for the new pointIndex-aware API and
+  the `TwoPersonCarry` pickup guard.
+- `docs/wiring/steel-two-person-carry-points.md` (new) — instructs Cameron to add a second,
+  mirrored `TwoPersonCarryPoint` child to `Steel.prefab` and set `pointIndex` (0/1) on both
+  (the existing single attach point predates this redesign).
+- `docs/ARCHITECTURE.md` — Interaction & Pickup section's two-person-carry writeup replaced
+  with the symmetric design + both bug fixes; Materials/Steel section and the "Unverified"
+  note updated to match.
+- `docs/PLANNED_FEATURES.md` — Steel Material section updated (symmetric carry, rotation
+  fix, max distance; "still to build" now calls out the second attach point specifically).
+- `docs/SESSION.md` — this entry.
+
+### Open items for Cameron to review
+
+- **Not compiled, no Unity Editor available this session either.** All C# changes were
+  hand-verified by direct read only, same as every prior session on this feature. None of
+  this has been playtested — `Steel.prefab` still needs the second attach point wired (see
+  the new wiring doc) before it can be.
+- **`maxShareDistance` (4, script default) is an unvalidated placeholder** — tune once you
+  can see the beam in-game; depends on how far apart the two attach points end up looking
+  in practice.
+- The rotation fix assumes `Quaternion.LookRotation` on the line between carrier *positions*
+  produces a sane beam orientation given the mesh's actual long axis — this was already an
+  open question in the original implementation (rotation was *some* `LookRotation` call
+  either way) and isn't newly introduced here, but it's worth a specific look once visible:
+  confirm the beam visually lies *along* the line between the two carriers, not across it.
+- Per the redesign, `TryPickup`'s and `EvaluateFeedback`'s new `GetComponent<TwoPersonCarry>()
+  != null` guards mean **any** future Heavy item that adds a `TwoPersonCarry` component
+  automatically loses generic body-collider pickup — intentional (it's meant to force use of
+  the attach points), but flagging in case a future Heavy material wants solo-only carry
+  without needing two attach points at all (not requested, just noting the coupling).

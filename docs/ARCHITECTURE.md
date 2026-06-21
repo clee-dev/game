@@ -238,36 +238,93 @@ Hover / PlaceValid / PlaceInvalid / Build`):
   bars described above — kept to what `OnGUI`'s existing immediate-mode style
   already does, no new Canvas/Image/texture asset added.
 
-**Two-player shared carry binding (this session).** The per-frame raycast also
-resolves a `TwoPersonCarryPoint` (`hitCollider.GetComponentInParent<TwoPersonCarryPoint>()`)
-alongside the existing targets. `HandleCarryBinding()` lets a second player
-press `[E]` on a held heavy item's dedicated attach-point collider to bind in
-via `TwoPersonCarry.RequestBindSecondaryRpc`, and lets either carrier release
-independently (`_boundCarry` tracks the local secondary-carrier state;
-pressing `[E]` again calls `RequestUnbindSecondaryRpc`). `MoveHeldObject()`
-branches on `TwoPersonCarry.IsShared`: when shared, the held object's position
-is the midpoint between both carriers' `TwoPersonCarry.CarryPointFor(bodyTransform)`
-(primary's own `transform` plus the secondary's body transform, fetched via
-`NetworkManager.Singleton.SpawnManager.GetPlayerNetworkObject(clientId)`)
-instead of the usual `holdPoint`.
-- **Why body transform, not `holdPoint`/camera:** `PlayerCamera` (and
-  therefore `holdPoint`, which follows camera pitch) is disabled entirely on
-  every non-owner client (`NetworkPlayer.ApplyComponentState`) and never
-  networked, so a remote carrier's camera-derived point is unreliable to read
-  from another client. Only the player body root's position + horizontal
-  rotation replicate reliably (`ClientNetworkTransform`), so both carriers'
-  carry points are computed the same way — body position plus a fixed
-  forward/height offset, ignoring pitch — for symmetry. The primary's
-  `ClientNetworkTransform` ownership keeps driving the one replicated write
-  either way; the secondary's body transform is only ever read, never written.
-- **Release/handoff** is split across two files: a secondary releasing only
-  calls `RequestUnbindSecondaryRpc` (no effect on the primary). The primary
-  releasing while shared instead goes through `PhysicsPickup.RequestDropServerRpc`,
-  which now checks `TwoPersonCarry.TryHandoffToSecondary()` first — if shared,
-  this transfers `NetworkObject` ownership to the secondary and returns early,
-  completely bypassing the normal throw/ownership-to-server drop path, so "the
-  secondary becomes the new primary" needs no special-casing at the
-  `PlayerInteraction` call site.
+**Two-player shared carry binding — symmetric two-point redesign (latest
+session).** Originally one fixed "primary" (generic body-collider pickup) plus
+one dedicated `TwoPersonCarryPoint` for a "secondary." Replaced after
+playtest feedback (rotation jank, unbounded carry distance, and a request for
+fully interchangeable hold points) with a symmetric model: every
+`TwoPersonCarry` item has **two** `TwoPersonCarryPoint`s (`pointIndex` 0/1,
+no fixed role), and the generic body-collider pickup path is disabled
+entirely for any item with a `TwoPersonCarry` component (`TryPickup` and the
+`EvaluateFeedback` hover-outline branch both check
+`GetComponent<TwoPersonCarry>() != null` and bail) — every grab goes through
+an attach point.
+
+The per-frame raycast resolves a `TwoPersonCarryPoint`
+(`hitCollider.GetComponentInParent<TwoPersonCarryPoint>()`) alongside the
+existing targets, same as before. `HandleCarryBinding()`:
+- If the item is currently unheld, grabbing **either** point is a normal solo
+  pickup — `TwoPersonCarry.RequestBindRpc(clientId, pointIndex)` claims that
+  point and (since nobody held it) calls `PhysicsPickup.ClaimServer` to
+  transfer `NetworkObject` ownership, exactly like picking up anything else.
+  The grabber's local `_heldObject` is set immediately (optimistic, same
+  pattern as `TryPickup`).
+- If the item is already held and the *other* point is still free, grabbing
+  it binds the second player in as a non-owner shared carrier — ownership
+  does not change. That player's local `_boundCarry` is set instead of
+  `_heldObject` (mirrors the old primary/secondary split, just no longer tied
+  to a specific point).
+- `TwoPersonCarry.CanBind(clientId, pointIndex)` covers both cases: false if
+  `clientId` already holds the *other* point (no double-binding yourself) or
+  if the requested point is already taken.
+- Either holder can release independently. A non-owner releasing calls
+  `TwoPersonCarry.RequestUnbindRpc` (frees their point only, no ownership
+  change). The owner releasing goes through
+  `PhysicsPickup.RequestDropServerRpc`, which checks
+  `TwoPersonCarry.TryHandoffOnOwnerRelease(OwnerClientId)` first — if shared,
+  ownership transfers to the other holder and the drop/throw path is skipped
+  entirely (the item is never dropped just because the owner let go); if not
+  shared, it's a real drop and `ClearHolderServer` frees the owner's own
+  point before the normal throw/ownership-to-server logic runs.
+- **Ownership-handoff reconciliation (bug found and fixed this session):**
+  the promoted player's local `_boundCarry`/`_heldObject` were never
+  reconciled after a handoff — `_heldObject` stayed null forever on the
+  newly-promoted owner, so `MoveHeldObject()` never ran for them again and
+  the item would freeze in place mid-air. Fixed with
+  `ReconcileCarryHandoff()`, called every `Update()` before `MoveHeldObject()`:
+  if `_boundCarry != null` and `_boundCarry.Pickup.OwnerClientId` now equals
+  this player's own `OwnerClientId`, promote `_heldObject = _boundCarry.Pickup`
+  and clear `_boundCarry`.
+- Prompt text now distinguishes the two cases: `attachTarget.Carry.IsHeldByAnyone`
+  picks `[E] Help Carry` (joining a shared carry) vs. `[E] Pick Up` (first
+  grab, solo).
+
+`MoveHeldObject()` branches on `TwoPersonCarry.IsShared`. When shared, the
+held object's position is the midpoint between both carriers'
+`TwoPersonCarry.CarryPointFor(bodyTransform)` — the owner's own `transform`
+plus `TwoPersonCarry.OtherHolder(OwnerClientId)`'s body transform, fetched via
+the now-public static `TwoPersonCarry.GetCarrierBodyTransform(clientId)` (a
+thin wrapper on `NetworkManager.Singleton.SpawnManager.GetPlayerNetworkObject`).
+- **Why body transform, not `holdPoint`/camera:** unchanged from the original
+  design — `PlayerCamera` (and therefore `holdPoint`, which follows camera
+  pitch) is disabled entirely on every non-owner client
+  (`NetworkPlayer.ApplyComponentState`) and never networked, so a remote
+  carrier's camera-derived point is unreliable to read from another client.
+  Only the player body root's position + horizontal rotation replicate
+  reliably (`ClientNetworkTransform`).
+- **Rotation jank fix (bug fixed this session):** the held item's *rotation*
+  used to be `Quaternion.LookRotation(transform.forward + otherBody.forward)`
+  — derived from both carriers' facing direction. `PlayerCamera` rotates the
+  player body directly on mouse-look yaw
+  (`playerBody.Rotate(Vector3.up * look.x, ...)`), fully decoupled from
+  movement, so a carrier turning their view in place — not moving at all —
+  changed `transform.forward` and visibly spun the carried item. Fixed by
+  deriving rotation purely from the **line between the two carriers' raw body
+  positions** instead (`axis = otherBody.position - transform.position`,
+  flattened with `axis.y = 0`, then `Quaternion.LookRotation(axis)`) — this
+  is stable under pure look-rotation since neither carrier's position changes
+  just because they turn their head. This is the standard fix used by
+  stretcher/log-carry mechanics in other co-op games: orient off the line
+  connecting the two carry points, never off either carrier's heading.
+- **Max carry distance (feature added this session):** nothing previously
+  capped how far apart the two carriers could drift while sharing — the rigid
+  item would stretch toward an ever-widening midpoint forever.
+  `TwoPersonCarry` now runs a server-only `Update()` while `IsShared`: if
+  `Vector3.Distance` between the owner's and other holder's body transforms
+  exceeds `maxShareDistance` (default 4, `[SerializeField]`, tune per item),
+  the non-owner's point is auto-cleared (`ClearHolderServer`) — the owner
+  keeps carrying solo and regains the weight penalty; the other player simply
+  "lets go" with no explicit input needed.
 
 **Welding Torch heat meter (`DrawTorchHeatMeter`, this session).** `OnGUI`
 draws a small heat bar centered low on screen whenever the locally held item
@@ -298,14 +355,19 @@ default, not a design call, in case Cameron wants a velocity-based feel instead.
 Currently implemented:
 - **Wood** — Light weight, Hammer tool, full prefab + built prefab (`WoodPlank`)
 
-**Steel — gameplay code implemented this session, prefab not yet built.**
-Heavy weight (`PhysicsPickup.Weight = WeightClass.Heavy`, 75% solo speed
-penalty via `PlayerController`), Welding Torch tool. Also the first material
-to use `TwoPersonCarry` (see Interaction & Pickup above) — a second player can
-bind to a dedicated attach-point collider to share the carry and remove the
-speed penalty for both. No `SteelBeam.prefab` exists yet, and no blueprint
-currently places a Steel tile/supply zone — see
-`docs/wiring/steel-material-and-welding-torch.md`.
+**Steel — gameplay code implemented, `Steel.prefab` built by Cameron with one
+`TwoPersonCarryPoint` child (pre-dating the symmetric two-point redesign — see
+Interaction & Pickup above).** Heavy weight (`PhysicsPickup.Weight =
+WeightClass.Heavy`, 75% solo speed penalty via `PlayerController`), Welding
+Torch tool. First (and so far only) material to use `TwoPersonCarry` — either
+player can grab either of its two attach points; whichever is grabbed first
+(while unheld) is a solo pickup, a second player grabbing the other point
+afterward shares the carry and removes the speed penalty for both, and either
+can release independently. `Steel.prefab` still only has one
+`TwoPersonCarryPoint` child — needs a second, mirrored one before the
+redesign is fully wired in-Editor — see
+`docs/wiring/steel-two-person-carry-points.md`. No blueprint currently places
+a Steel tile/supply zone — see `docs/wiring/steel-material-and-welding-torch.md`.
 
 Defined but not yet implemented at all:
 - **Concrete** — Medium weight, Trowel tool (no prefab, no gameplay)
@@ -442,20 +504,33 @@ unaffected by either:
   short-circuits the stillness gate, and `_activeTorchFuel` is only ever
   non-null while an active Torch build is in progress.
 
-**Unverified — no Unity Editor or C# compiler available this session.** The
-entire Weight Classes / Two-Person Carry / Welding Torch burnout feature set
+**Unverified — no Unity Editor or C# compiler available this or any prior
+session.** The entire Weight Classes / Two-Person Carry / Welding Torch
+burnout feature set, including the symmetric two-point carry redesign above
 (`WeightClass` enum, `PlayerController.CurrentWeightMultiplier`,
 `TwoPersonCarry`, `TwoPersonCarryPoint`, `WeldingTorchFuel`, and the
-`PlayerInteraction`/`BuildTile` integration described above) was hand-verified
-by direct read only, never compiled. No `SteelBeam.prefab`/`WeldingTorch.prefab`
-exist yet to playtest against — see `docs/wiring/steel-material-and-welding-torch.md`.
-Once those prefabs exist, please confirm: solo-carrying a Steel item slows
-movement to 25%; a second player binding via the attach point restores both
-carriers to full speed; either carrier releasing independently works, and the
-primary releasing while shared hands ownership to the secondary instead of
-dropping the item; a Torch build pauses (not resets) progress while the
-welder moves and resumes when they stop; ~8s of continuous welding overheats
-the torch and locks it out for ~4s before it can be used again.
+`PlayerInteraction`/`BuildTile` integration) was hand-verified by direct read
+only, never compiled. Cameron has since playtested the pre-redesign version
+once `Steel.prefab` existed and reported three issues, all addressed in the
+redesign above: rotation jank while a stationary carrier looked around (fixed
+by deriving rotation from carrier body *positions*, not facing direction),
+no maximum carry distance (fixed with a server-side `maxShareDistance` check),
+and a request for fully interchangeable hold points instead of a fixed
+primary/secondary split (the two-point redesign itself). None of the new code
+has been playtested yet — `Steel.prefab` still needs a second
+`TwoPersonCarryPoint` child added before it can be — see
+`docs/wiring/steel-two-person-carry-points.md`. Once that's wired, please
+confirm: either point can start a solo carry (slows movement to 25%);
+grabbing the other point while someone else holds it shares the carry and
+restores both to full speed; either carrier releasing independently works,
+and the owner releasing while shared hands ownership to the other carrier
+instead of dropping the item (including a beam thrown across the level by the
+newly-promoted owner — verifies `ReconcileCarryHandoff` actually picked it
+up); drifting more than ~4m apart while shared auto-drops the non-owner
+side; rotating in place while stationary and sharing a carry no longer spins
+the beam. Torch burnout behavior (pause-not-reset while moving, ~8s
+overheat, ~4s lockout) is unchanged from before and still unverified the
+same way.
 
 ---
 

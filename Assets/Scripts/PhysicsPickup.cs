@@ -89,6 +89,33 @@ public class PhysicsPickup : NetworkBehaviour
         _isHeld.Value = held;
     }
 
+    /// <summary>Server-only. Marks held and transfers ownership, without the "already
+    /// held" guard RequestPickupServerRpc applies -- used by TwoPersonCarry.RequestBindRpc
+    /// when a first grab on an unheld item claims ownership the same way a normal pickup
+    /// would.</summary>
+    public void ClaimServer(ulong clientId)
+    {
+        if (!IsServer) return;
+        _isHeld.Value = true;
+        NetworkObject.ChangeOwnership(clientId);
+    }
+
+    /// <summary>Server-only. Returns ownership to the host and applies throw physics --
+    /// the actual drop, shared by RequestDropServerRpc's normal path and by
+    /// TwoPersonCarry's full-release case.</summary>
+    public void ReleaseServer(Vector3 throwVelocity)
+    {
+        if (!IsServer) return;
+
+        _isHeld.Value = false;
+        NetworkObject.ChangeOwnership(NetworkManager.ServerClientId);
+
+        _rb.isKinematic = false;
+        _rb.linearVelocity = throwVelocity;
+
+        Debug.Log($"[PhysicsPickup] Dropped with velocity {throwVelocity}");
+    }
+
     // -------------------------------------------------------------------------
     // RPCs
     // -------------------------------------------------------------------------
@@ -102,8 +129,12 @@ public class PhysicsPickup : NetworkBehaviour
         // Reject if already held by someone
         if (_isHeld.Value) return;
 
-        _isHeld.Value = true;
-        NetworkObject.ChangeOwnership(requesterClientId);
+        // TwoPersonCarry items must be claimed via one of their dedicated attach points
+        // (TwoPersonCarry.RequestBindRpc), not the generic body collider -- otherwise a
+        // solo grab here would bypass the two-point binding bookkeeping entirely.
+        if (_twoPersonCarry != null) return;
+
+        ClaimServer(requesterClientId);
 
         Debug.Log($"[PhysicsPickup] Picked up by client {requesterClientId}");
     }
@@ -111,26 +142,23 @@ public class PhysicsPickup : NetworkBehaviour
     /// <summary>
     /// Only the current owner (holder) can drop. Host takes ownership back and applies throw.
     ///
-    /// If this item is being shared (TwoPersonCarry.IsShared), the primary letting go is a
-    /// handoff, not a real drop: the secondary becomes the new primary and keeps carrying it
-    /// solo (PLANNED_FEATURES.md, Steel Material -- "secondary becomes primary"), so it never
-    /// touches physics or _isHeld at all.
+    /// If this item is being shared (TwoPersonCarry.IsShared), the owner letting go is a
+    /// handoff, not a real drop: the other holder becomes the new owner and keeps carrying
+    /// it solo (PLANNED_FEATURES.md, Steel Material -- "either can release independently"),
+    /// so it never touches physics or _isHeld at all. Otherwise this is a full release, so
+    /// any TwoPersonCarry point the owner themselves occupied is freed too.
     /// </summary>
     [ServerRpc]
     public void RequestDropServerRpc(Vector3 throwVelocity)
     {
-        if (_twoPersonCarry != null && _twoPersonCarry.TryHandoffToSecondary())
-            return;
+        if (_twoPersonCarry != null)
+        {
+            if (_twoPersonCarry.TryHandoffOnOwnerRelease(OwnerClientId))
+                return;
 
-        _isHeld.Value = false;
+            _twoPersonCarry.ClearHolderServer(OwnerClientId);
+        }
 
-        // Return ownership to host so host simulates the throw physics
-        NetworkObject.ChangeOwnership(NetworkManager.ServerClientId);
-
-        // Apply throw velocity on the host (now the owner)
-        _rb.isKinematic = false;
-        _rb.linearVelocity = throwVelocity;
-
-        Debug.Log($"[PhysicsPickup] Dropped with velocity {throwVelocity}");
+        ReleaseServer(throwVelocity);
     }
 }
