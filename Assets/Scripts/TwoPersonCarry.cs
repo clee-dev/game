@@ -35,6 +35,13 @@ public class TwoPersonCarry : NetworkBehaviour
     [Header("Auto-release the non-owner carrier if they drift this far apart (server-only)")]
     [SerializeField] private float maxShareDistance = 4f;
 
+    [Header("Local axis on this prefab that runs along the item's length")]
+    // Aligned to the line between carriers when shared, or to the holder's facing when
+    // solo (see OrientationFor) -- Steel.prefab is scaled long on local X (root
+    // m_LocalScale {1.87, 1, 1}), not the local Z a generic "forward-facing" held item
+    // would assume, so this needs to be explicit rather than hardcoded to Vector3.forward.
+    [SerializeField] private Vector3 carryAxisLocal = Vector3.right;
+
     private readonly NetworkVariable<ulong> _holderA = new(
         NoHolder, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
     private readonly NetworkVariable<ulong> _holderB = new(
@@ -157,6 +164,13 @@ public class TwoPersonCarry : NetworkBehaviour
     /// their body root transform, deliberately ignoring camera pitch (see class remarks).</summary>
     public Vector3 CarryPointFor(Transform carrierBody) =>
         carrierBody.position + carrierBody.forward * forwardOffset + Vector3.up * heightOffset;
+
+    /// <summary>Rotation that points carryAxisLocal along a horizontal world direction.
+    /// Used for both solo and shared carry instead of Quaternion.LookRotation, which would
+    /// point local +Z (not necessarily this item's long axis -- see carryAxisLocal) along
+    /// the direction instead.</summary>
+    public Quaternion OrientationFor(Vector3 horizontalDirection) =>
+        Quaternion.FromToRotation(carryAxisLocal, horizontalDirection);
 
     /// <summary>Body-root transform of another connected player, by client ID -- reliable
     /// to read from any machine (position + horizontal rotation replicate via
