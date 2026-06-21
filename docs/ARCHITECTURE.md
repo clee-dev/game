@@ -1311,35 +1311,89 @@ the Canvas version was built. `DrawOrderMenu()` and its `OnGUI()` call are
 deleted — the Canvas version was already fully functional and is the only one
 that should exist.
 
-**Kiosk (`LevelSelectKiosk`) and Hub Terminal (`HubTerminal`) menus are not yet
-migrated to this pattern** — they still render via OnGUI
-(`DrawKioskMenu()`/`DrawTerminalMenu()`), left in place as a working fallback
-(removing it without a finished replacement would have been a real
-regression, unlike the Order menu case where the replacement already existed
-and worked). `KioskMenuPanel.cs`/`TerminalMenuPanel.cs` (new this session) are
-code-complete equivalents of `OrderMenuPanel.cs` — a fixed 9-row panel
-(matching the existing number-key selection cap), with `PlayerInteraction`
-gaining the small public getters they need
+**Kiosk (`LevelSelectKiosk`) and Hub Terminal (`HubTerminal`) menus are now
+migrated to this pattern too.** `KioskMenuPanel.cs`/`TerminalMenuPanel.cs`
+(new this session) are equivalents of `OrderMenuPanel.cs` — fixed 9-row panels
+(matching the existing number-key selection cap) toggled the same way, with
+`PlayerInteraction` gaining the small public getters they need
 (`TerminalHighlightedIndex`/`TerminalFlashActive`, alongside the
 already-existing `IsKioskMenuOpen`/`OpenKioskMenuTarget`/
-`IsTerminalMenuOpen`/`OpenTerminalMenuTarget`). **The Canvas hierarchy and
-Button.OnClick wiring are Editor-only steps** — `Button.OnClick` persistent
-listeners can't be set through the available automated Editor tooling (tested
-and confirmed: a `set_component_property` call against `Button.onClick`
-silently no-ops, the listener list stays empty). See
-`docs/wiring/kiosk-terminal-canvas-menus.md` for exact steps (duplicate the
-working Order menu structure and relabel). Once both are wired and confirmed
-working, delete the OnGUI fallback the same way `DrawOrderMenu()` was deleted.
+`IsTerminalMenuOpen`/`OpenTerminalMenuTarget`).
 
-**Crosshair, Torch heat meter, delivery queue, and debug-demolish hint remain
-OnGUI** — simple screen-space HUD overlays, not "press E, pick from a list"
-menus, so they're a separate and lower-priority follow-up from the menu work
-above. `LevelEditorUI`'s tool panels are also still OnGUI, and its own doc
-comment explicitly declares this a deliberate design choice ("needs no
-Canvas/Button hierarchy to be usable") — converting it would be reversing an
-explicit prior decision, not just finishing in-progress work, so it needs
-Cameron's confirmation before any Canvas migration there (see "Pause Menu"
-section above for the prior, still-unresolved flag on this same tension).
+`Button.OnClick` persistent listeners can't be set through
+`Unity_ManageGameObject.set_component_property` (tested and confirmed: it
+silently no-ops, the listener list stays empty) — but direct Editor script
+execution (`Unity_RunCommand`) has full access to
+`UnityEditor.Events.UnityEventTools`, which **can** add real persistent
+listeners with static int arguments, the same mechanism the Inspector itself
+uses. The full `kioskMenuUI`/`terminalMenuUI` Canvas hierarchies (9 rows each,
+Terminal's also with a detail line, preview `RawImage`, and confirm-flash
+label) were built and wired this way against
+`PrefabUtility.LoadPrefabContents`/`SaveAsPrefabAsset` on `Player.prefab`,
+verified after the fact by reading back `Button.onClick.GetPersistentEventCount()`
+and the target method names. The OnGUI fallback
+(`DrawKioskMenu()`/`DrawTerminalMenu()`) has been deleted — see
+`docs/wiring/kiosk-terminal-canvas-menus.md` for the full build approach
+(kept for reference/reuse, marked done). **Layout was set programmatically,
+not visually proofed by a human** — Cameron should open the Hub kiosk/terminal
+once and confirm spacing/readability, tuning directly in the Inspector if
+needed.
+
+**Crosshair, Torch heat meter, and delivery queue remain OnGUI** — simple
+screen-space HUD overlays, not "press E, pick from a list" menus, so they're a
+separate and lower-priority follow-up from the menu work above.
+
+**`LevelEditorUI`'s tool panels are now also migrated to Canvas/uGUI**
+(explicitly requested by Cameron after the OnGUI-only design comment was
+flagged — not a unilateral reversal). `LevelEditorCanvasUI.cs` (new) is a
+full Canvas-driven equivalent of `LevelEditorUI`: top bar (mode switch, layer
+controls, undo/redo), tile palette, world object panel (including up to 5
+tool depot rows with hammer/trowel/torch toggles), tile property panel,
+contract settings (id/name fields, scenery, time limit, allowed-material
+toggles, completion thresholds, payout, grid size), and save/load (including
+a load-list of up to 12 blueprints). Built and wired entirely via
+`Unity_RunCommand` against the live `LevelEditor.unity` scene, same technique
+as the Kiosk/Terminal menus.
+
+Two design notes specific to this migration:
+- **Toggles and `TMP_InputField`s are not event-wired.** Unity's dynamic
+  (forward-the-actual-runtime-value) persistent listener mode isn't reachable
+  through `UnityEventTools`' public API — only static arguments are (confirmed
+  while building the Kiosk/Terminal menus). Instead, `LevelEditorCanvasUI`
+  pull-syncs every widget every frame (`SyncToggle`/`SyncField`), diffing the
+  widget's current value against a cached "last known" value to tell a user
+  edit apart from an external change (e.g. `NewBlueprint()`/`LoadBlueprint()`).
+  Buttons still use real `Button.OnClick` persistent listeners (static
+  arguments where needed), since clicks carry no meaningful dynamic data.
+- **Tool depot rows and the load list are fixed-count, not dynamic
+  instantiation** — 5 depot rows, 12 load-list rows, both pre-built and
+  shown/hidden by count, mirroring the same fixed-row-capped-by-existing-limit
+  reasoning as Kiosk/Terminal's 9-row cap.
+
+**Found and fixed a regression introduced while disabling the old OnGUI
+component:** `LevelEditorController.HandleClickInput()` checked
+`LevelEditorUI.IsPointerOverUI`, a static flag only ever updated inside
+`LevelEditorUI.OnGUI()` — disabling that component would have frozen the flag
+at `false` forever, letting clicks on the new Canvas buttons fall through and
+also register as world tile-placement clicks. Fixed by also checking
+`EventSystem.current.IsPointerOverGameObject()` (the standard uGUI
+equivalent, works regardless of which script owns the Canvas) alongside the
+old flag.
+
+The old `LevelEditorUI` component is **disabled, not deleted**, on the
+`LevelEditor` GameObject in `LevelEditor.unity` — kept as a manual emergency
+fallback (re-enable the checkbox in the Inspector) in case the Canvas version
+has a problem only visible once actually played. Verified before disabling:
+zero null serialized references across every field on `LevelEditorCanvasUI`
+(checked programmatically via `SerializedObject` iteration), and the new
+top bar/tile-palette/world-object/tile-property/contract-settings/save-load
+button `OnClick`s all carry real persistent listeners with the correct target
+methods. **Not verified by an actual playtest** — this scene's `IsHost` check
+depends on an active `NetworkManager` session normally reached via
+Boot→MainMenu→Hub, so an isolated Play Mode entry on `LevelEditor.unity` alone
+wouldn't exercise the real (host) code path, only the always-safe "Spectating"
+fallback. Cameron should open the Level Editor through the normal Hub flow and
+confirm every panel reads/writes correctly before trusting this fully.
 
 ---
 

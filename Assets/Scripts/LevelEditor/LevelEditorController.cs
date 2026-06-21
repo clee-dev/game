@@ -5,6 +5,7 @@ using System.Linq;
 using Newtonsoft.Json;
 using Unity.Netcode;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 
 /// <summary>
@@ -195,7 +196,12 @@ public class LevelEditorController : MonoBehaviour
     private void HandleClickInput()
     {
         var mouse = Mouse.current;
-        if (mouse == null || LevelEditorUI.IsPointerOverUI) return;
+        // LevelEditorUI's OnGUI-computed IsPointerOverUI only updates while that
+        // (now-disabled, Canvas-superseded -- see LevelEditorCanvasUI) component runs.
+        // EventSystem.IsPointerOverGameObject() is the standard uGUI equivalent and works
+        // for any Canvas UI regardless of which script owns it.
+        bool overUI = EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
+        if (mouse == null || LevelEditorUI.IsPointerOverUI || overUI) return;
 
         if (mouse.leftButton.wasPressedThisFrame) HandleClick(erase: false);
         if (mouse.rightButton.wasPressedThisFrame) HandleClick(erase: true);

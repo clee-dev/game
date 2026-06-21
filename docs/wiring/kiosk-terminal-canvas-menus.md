@@ -1,9 +1,33 @@
 # Wiring: Kiosk & Terminal Canvas Menus
 
-**Status:** Pending. Editor-only wiring — code is complete (`KioskMenuPanel.cs`,
-`TerminalMenuPanel.cs`, both new), but `Button.OnClick` persistent listeners and
-array-of-reference Inspector fields can't be wired through automated tooling —
-they need to be dragged in the Editor.
+**Status: DONE.** Built and wired programmatically via `Unity_RunCommand`
+(`UnityEditor.Events.UnityEventTools.AddIntPersistentListener`/
+`AddVoidPersistentListener` against a loaded `PrefabUtility.LoadPrefabContents`
+instance of `Player.prefab`, saved back with `PrefabUtility.SaveAsPrefabAsset`).
+The initial assumption below — that `Button.OnClick` can't be wired through
+automated tooling — was correct for `Unity_ManageGameObject.set_component_property`
+(confirmed: silently no-ops on UnityEvent fields) but **not** for direct
+Editor-script execution, which has full access to `UnityEventTools`. Verified
+after building: both panels exist, both `*MenuPanel` components have all
+serialized references populated, and `Button.onClick.GetPersistentEventCount()`
+returns 1 with the correct target method name for both Kiosk and Terminal rows.
+The OnGUI fallback (`DrawKioskMenu`/`DrawTerminalMenu`) has been removed from
+`PlayerInteraction.cs`. Layout (anchored positions/sizes below) was set
+programmatically and not visually proofed by a human — Cameron should open the
+Hub kiosk/terminal in-Editor once and confirm it reads well, then retune
+spacing/styling directly in the Inspector if needed (now that it's real UI,
+not OnGUI, that's a normal Editor task rather than a code change).
+
+The rest of this document is left as-is below for reference on what was built
+and why, in case it needs rebuilding or extending.
+
+---
+
+**Original status note (superseded above):** Editor-only wiring — code is
+complete (`KioskMenuPanel.cs`, `TerminalMenuPanel.cs`, both new), but
+`Button.OnClick` persistent listeners and array-of-reference Inspector fields
+can't be wired through automated tooling — they need to be dragged in the
+Editor.
 
 ## Why this exists
 

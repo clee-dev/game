@@ -797,8 +797,6 @@ public class PlayerInteraction : NetworkBehaviour
 
         DrawCrosshair();
         DrawOrderQueue();
-        DrawKioskMenu();
-        DrawTerminalMenu();
         DrawDebugDemolishHint();
         DrawTorchHeatMeter();
     }
@@ -885,95 +883,6 @@ public class PlayerInteraction : NetworkBehaviour
         GUI.DrawTexture(new Rect(area.x, area.y, area.width * fuel.HeatFraction, area.height), Texture2D.whiteTexture);
         GUI.color = Color.white;
         GUI.Label(new Rect(area.x, area.y - 16f, area.width, 16f), fuel.IsOverheated ? "Overheated" : "Torch Heat");
-    }
-
-    // -------------------------------------------------------------------------
-    // Kiosk / Hub Terminal menu rendering -- OnGUI fallback, kept until the
-    // Canvas-based replacement (KioskMenuPanel.cs / TerminalMenuPanel.cs, plus
-    // Player.prefab Canvas panels matching the Order menu's existing "menuUI" +
-    // OrderMenuPanel pattern) is wired in the Editor. See
-    // docs/wiring/kiosk-terminal-canvas-menus.md -- Button.OnClick persistent
-    // listeners can't be wired through the available automated tooling, so this
-    // is an Editor-only step. Delete this OnGUI block once that's done and
-    // confirmed working, same as the Order menu's now-removed DrawOrderMenu.
-    // -------------------------------------------------------------------------
-
-    private const float MenuWidth      = 220f;
-    private const float MenuLineHeight = 22f;
-    private const float MenuPadding    = 8f;
-
-    private void DrawKioskMenu()
-    {
-        if (_openKioskMenuTarget == null) return;
-
-        int count = _openKioskMenuTarget.OptionCount;
-        float height = MenuPadding * 2f + MenuLineHeight * (count + 1);
-        var area = new Rect(
-            Screen.width * 0.5f - MenuWidth * 0.5f,
-            Screen.height * 0.5f + 20f,
-            MenuWidth, height);
-
-        GUI.Box(area, "Select Level");
-        for (int i = 0; i < count; i++)
-        {
-            var lineRect = new Rect(
-                area.x + MenuPadding,
-                area.y + MenuPadding + MenuLineHeight * (i + 1),
-                MenuWidth - MenuPadding * 2f, MenuLineHeight);
-            GUI.Label(lineRect, $"[{i + 1}] {_openKioskMenuTarget.DescribeOption(i)}");
-        }
-    }
-
-    private const float TerminalMenuWidth        = 420f;
-    private const float TerminalDetailLineHeight = 16f;
-    private const float TerminalPreviewSize      = 96f;
-
-    private void DrawTerminalMenu()
-    {
-        if (_openTerminalMenuTarget == null) return;
-
-        int count = _openTerminalMenuTarget.OptionCount;
-        float rowHeight = MenuLineHeight + TerminalDetailLineHeight;
-        float height = MenuPadding * 2f + MenuLineHeight + rowHeight * count + TerminalPreviewSize + MenuPadding;
-        var area = new Rect(
-            Screen.width * 0.5f - TerminalMenuWidth * 0.5f,
-            Screen.height * 0.5f - height * 0.5f,
-            TerminalMenuWidth, height);
-
-        GUI.Box(area, "Hub Terminal -- Select Blueprint");
-
-        float y = area.y + MenuPadding + MenuLineHeight;
-        for (int i = 0; i < count; i++)
-        {
-            bool highlighted = i == _terminalHighlightedIndex;
-
-            GUI.color = highlighted ? Color.yellow : Color.white;
-            GUI.Label(new Rect(area.x + MenuPadding, y, TerminalMenuWidth - MenuPadding * 2f, MenuLineHeight),
-                $"{(highlighted ? ">" : " ")} [{i + 1}] {_openTerminalMenuTarget.DescribeOption(i)}");
-            y += MenuLineHeight;
-
-            GUI.color = Color.gray;
-            GUI.Label(new Rect(area.x + MenuPadding + 16f, y, TerminalMenuWidth - MenuPadding * 2f - 16f, TerminalDetailLineHeight),
-                _openTerminalMenuTarget.DescribeDetails(i));
-            y += TerminalDetailLineHeight;
-        }
-        GUI.color = Color.white;
-
-        Texture2D preview = _openTerminalMenuTarget.GetPreviewTexture(_terminalHighlightedIndex);
-        var previewRect = new Rect(
-            area.x + TerminalMenuWidth * 0.5f - TerminalPreviewSize * 0.5f,
-            y + MenuPadding, TerminalPreviewSize, TerminalPreviewSize);
-        if (preview != null)
-            GUI.DrawTexture(previewRect, preview);
-        else
-            GUI.Box(previewRect, "");
-
-        if (_terminalFlashTimer > 0f)
-        {
-            GUI.color = Color.green;
-            GUI.Label(new Rect(area.x, area.y - 22f, TerminalMenuWidth, 20f), "Selection confirmed!");
-            GUI.color = Color.white;
-        }
     }
 
     // -------------------------------------------------------------------------
