@@ -1395,3 +1395,145 @@ resolved decisions, noted the `OnGUI` deviation.
   to keep it visually distinct from `LevelSelectKiosk` (yellow Cylinder) and
   clear of existing geometry — not a documented design decision, easy to
   move/reskin if you want something else.
+
+---
+
+## 2026-06-21
+
+**Context from Cameron:** "see my claude.md file, implement the next feature."
+Picked the next item off `docs/PLANNED_FEATURES.md`'s backlog: **Steel
+Material** (Phase A, "Complete the Material Loop"), plus its dependency, the
+general-purpose **Weight Classes and Speed Penalties** system. Asked
+clarifying questions first; resolved decisions:
+
+- Two-player carry binds via a dedicated attach-point collider + interact
+  prompt (not proximity-based).
+- Torch stillness requirement is "pause, not cancel" — moving while welding
+  withholds progress for that tick but doesn't reset it; the existing
+  no-ping-for-0.3s reset still applies independently.
+- Torch has a burnout meter (~8s continuous use, ~4s cooldown), not unlimited
+  use or a consumable/durability item.
+- No speed penalty once a Heavy item's carry is shared between two players.
+- If the primary releases while shared, the secondary becomes the new
+  primary (ownership handoff) — the item is never dropped just because the
+  primary let go.
+
+### Implementation
+
+**Weight Classes (general system, reusable by future Medium materials):**
+`WeightClass` enum (`Assets/Scripts/Blueprint/BlueprintEnums.cs`).
+`PhysicsPickup.weightClass`/`Weight` exposes it per-prefab.
+`PlayerController.CurrentWeightMultiplier()` reads
+`PlayerInteraction.HeldObject`, checks for a shared `TwoPersonCarry` first
+(always 1.0 if shared), otherwise maps `WeightClass` to
+`mediumWeightMultiplier` (0.85, placeholder — no Medium material exists yet
+to tune against) / `heavyWeightMultiplier` (0.25, the 75% reduction the doc
+specifies for Steel); applied to both walk and sprint speed in `Move()`.
+
+**Two-player shared carry:** `TwoPersonCarry.cs` (new) — `NetworkVariable<ulong>`
+secondary-holder id, `RequestBindSecondaryRpc`/`RequestUnbindSecondaryRpc`,
+`TryHandoffToSecondary()`. `TwoPersonCarryPoint.cs` (new) — marker for a
+dedicated attach-point collider, resolved by `PlayerInteraction`'s existing
+raycast alongside its other targets. `PhysicsPickup.RequestDropServerRpc` now
+tries `TryHandoffToSecondary()` first; if shared, this transfers ownership to
+the secondary and returns early, completely skipping the normal throw/drop
+path — implements "secondary becomes primary" with no special-casing at the
+`PlayerInteraction.Drop()` call site.
+
+**Why carry-point math uses body transforms, not `holdPoint`/camera:**
+`PlayerCamera` (and therefore `holdPoint`, which follows camera pitch) is
+disabled entirely on every non-owner client (`NetworkPlayer.ApplyComponentState`)
+and never networked, so a remote carrier's camera-derived point can't be read
+reliably from another client. Only the player body root's position +
+horizontal rotation replicate reliably (`ClientNetworkTransform`), so
+`TwoPersonCarry.CarryPointFor(Transform)` computes both carriers' points the
+same way — body position plus a fixed forward/height offset, ignoring pitch
+— and `PlayerInteraction.MoveHeldObject()` averages the two when
+`TwoPersonCarry.IsShared`, fetching the secondary's body transform via
+`NetworkManager.Singleton.SpawnManager.GetPlayerNetworkObject(clientId)`.
+
+**Welding Torch burnout:** `WeldingTorchFuel.cs` (new) — server-authoritative
+heat meter (`NetworkVariable<float> heat`, `NetworkVariable<bool> overheated`).
+`TryHeat(deltaTime)` is called once per build tick by `BuildTile` while that
+specific torch instance drives a build; returns `false` once `maxHeat` (8s
+placeholder) is reached, locking out for `cooldownDuration` (4s placeholder).
+Drains at `drainRate` (1/sec placeholder) any time the torch isn't actively
+welding, not just during the lockout, so short bursts recover between builds.
+
+**`BuildTile` integration:** `ContinueBuildRpc` gained `bool isStill` (computed
+by `PlayerInteraction.HandleContinuousBuild` from
+`InputReader.MoveInput.sqrMagnitude < 0.0001f`) and `NetworkObjectReference
+toolRef` (resolves the specific `WeldingTorchFuel` instance, since `BuildTile`
+otherwise only knows the held `ToolType`). `BuildTickCoroutine` gates progress
+on both `isStill` and `TryHeat()` for `ToolType.Torch` only — either gate
+withholds that tick's progress without resetting it, distinct from the
+existing `BuildPingGrace` reset-on-no-ping behavior, which is unchanged.
+
+**`PlayerInteraction`:** added the `TwoPersonCarryPoint` raycast target,
+`HandleCarryBinding()`, shared-carry branch in `MoveHeldObject()`, "[E] Help
+Carry" / "[E] Let Go (Carrying)" prompts, and `DrawTorchHeatMeter()` (an
+`OnGUI` heat bar, same immediate-mode style as the rest of the crosshair/
+feedback system).
+
+### Prefab discovery — Cameron had already started this in the Editor
+
+While writing the wiring doc, found that `Steel.prefab`, `Welding Torch.prefab`,
+`Concrete.prefab`, and `Trowel.prefab` already exist (commits `d52e5f9`,
+`2d185a3`, dated before this session), already correctly typed
+(`MaterialItem.materialType`/`ToolItem.toolType`) and already registered in
+`Assets/DefaultNetworkPrefabs.asset`. The master `ToolDepotSpawner.prefab`
+template's `toolPrefabs[]` also already includes Hammer + Trowel + Welding
+Torch. None of that needed touching.
+
+**Found and flagged, not fixed:** `Assets/Prefabs/SupplyZoneSpawner.prefab` —
+the exact prefab `Game1.unity`'s `BuildSystem.supplyZoneSpawnerPrefab` points
+to — has its single `materialPrefab` already switched to **Steel**, not
+Wood. `SupplyZoneSpawner`/`BuildSystem` only support one material globally
+per scene (no per-supply-zone material field in the blueprint schema, no
+array on `BuildSystem`), so right now **every** supply zone in `Game1` spawns
+Steel, and Wood/Steel can't coexist in one blueprint. Didn't revert this
+myself — not sure if it's deliberate mid-test state from Cameron's own
+session or a leftover. See the wiring doc for the full writeup; this is a
+real architectural gap (`SupplyZoneSpawner` needs the same array +
+`Configure()` treatment `ToolDepotSpawner` already has) if Steel and Wood
+need to ship side by side.
+
+### Changes made this session
+
+- `Assets/Scripts/Blueprint/BlueprintEnums.cs` — added `WeightClass` enum.
+- `Assets/Scripts/PhysicsPickup.cs` — `weightClass`/`Weight`, handoff check in
+  `RequestDropServerRpc`.
+- `Assets/Scripts/PlayerController.cs` — `playerInteraction` reference,
+  `mediumWeightMultiplier`/`heavyWeightMultiplier`, `CurrentWeightMultiplier()`.
+- `Assets/Scripts/PlayerInteraction.cs` — carry binding, shared-carry move
+  logic, torch heat meter GUI, stillness signal into `HandleContinuousBuild`.
+- `Assets/Scripts/Build/BuildTile.cs` — `ContinueBuildRpc`/`BuildTickCoroutine`
+  stillness-pause + overheat gating, `_activeTorchFuel` cleanup.
+- `Assets/Scripts/TwoPersonCarry.cs` (new) + `.meta`.
+- `Assets/Scripts/TwoPersonCarryPoint.cs` (new) + `.meta`.
+- `Assets/Scripts/Build/WeldingTorchFuel.cs` (new) + `.meta`.
+- `docs/ARCHITECTURE.md` — Player/Interaction & Pickup/Materials/Tools/Build
+  Tiles sections updated; "Known Gaps" trimmed.
+- `docs/PLANNED_FEATURES.md` — Steel Material and Weight Classes marked
+  built, resolved open questions recorded.
+- `docs/wiring/steel-material-and-welding-torch.md` (new).
+- `docs/SESSION.md` — this entry.
+
+### Open items for Cameron to review
+
+- **Not compiled, no Unity Editor available this session.** All C# changes
+  were hand-verified by direct read only. No playtest possible from this
+  environment.
+- **Supply zone flag above** — please confirm whether `SupplyZoneSpawner.prefab`
+  pointing at Steel instead of Wood is intentional, and whether you want the
+  multi-material extension built now or later.
+- **Stillness detection is input-based, not velocity-based** (full stop on
+  `MoveInput`, not a `CharacterController` velocity threshold) — a
+  simplification I chose for simplicity/predictability, not a confirmed
+  design call. Flagging in case it doesn't feel right once playable.
+- **`mediumWeightMultiplier` (0.85) is an unvalidated placeholder** — no
+  Medium-weight material exists yet to tune it against.
+- Remaining prefab/blueprint wiring (attach-point collider on `Steel.prefab`,
+  `WeldingTorchFuel` on `Welding Torch.prefab`, `playerInteraction` on
+  `Player.prefab`, blueprint content) is laid out step by step in
+  `docs/wiring/steel-material-and-welding-torch.md`.

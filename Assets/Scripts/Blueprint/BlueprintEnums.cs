@@ -18,6 +18,11 @@ public enum TileState { Empty, MaterialPlaced, Built, Destroyed }
 
 public enum MaterialState { Loose, Held, Placed, Built }
 
+/// <summary>How much a held item slows the carrier down (PLANNED_FEATURES.md, Weight
+/// Classes and Speed Penalties). Read by PhysicsPickup.Weight, applied by
+/// PlayerController against whichever item PlayerInteraction currently holds.</summary>
+public enum WeightClass { Light, Medium, Heavy }
+
 public static class BlueprintEnums
 {
     public static TileType ParseTileType(string raw) =>

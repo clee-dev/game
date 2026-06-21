@@ -66,7 +66,7 @@ together before it can be placed.
 
 ---
 
-### Steel Material
+### Steel Material — Built (code), prefab/blueprint pending
 
 **What it is:** A heavy buildable material requiring two-player carry.
 
@@ -74,32 +74,71 @@ together before it can be placed.
 - Weight class: Heavy — 75% movement speed reduction when held solo
 - Two-player shared carry: second player binds in, movement averages between both,
   either can release independently
+- If the primary releases while shared, the secondary becomes the new primary
+  (ownership handoff, not a drop)
 - Tool: Welding Torch (requires stillness during build interaction)
 - Build duration: 4.0s (slower than Hammer/Trowel)
+- Torch has a burnout meter, not unlimited use (resolves the fuel/durability
+  open question below) — see Remaining Tools
 
-**What to build:**
-- `SteelBeam` prefab with Heavy weight class
-- Two-player carry binding system on `PlayerInteraction` / `PhysicsPickup`
-- Stillness detection during Torch build (cancel progress if player moves)
+**Built:**
+- `WeightClass` enum (`Assets/Scripts/Blueprint/BlueprintEnums.cs`) — shared by
+  any future Medium/Heavy material, not Steel-specific.
+- `PhysicsPickup.Weight` exposes it per-prefab; `PlayerController.CurrentWeightMultiplier()`
+  applies it to walk/sprint speed (see Weight Classes and Speed Penalties below).
+- `TwoPersonCarry` (`Assets/Scripts/TwoPersonCarry.cs`) — `NetworkVariable<ulong>`
+  secondary-holder id, `RequestBindSecondaryRpc`/`RequestUnbindSecondaryRpc`,
+  `TryHandoffToSecondary()` (called from `PhysicsPickup.RequestDropServerRpc`
+  when the primary releases while shared). `CarryPointFor(Transform)` derives
+  each carrier's carry point from their body root (not camera/holdPoint) — see
+  `docs/ARCHITECTURE.md` Interaction & Pickup for why.
+- `TwoPersonCarryPoint` (`Assets/Scripts/TwoPersonCarryPoint.cs`) — marker on a
+  separate attach-point collider, resolved by `PlayerInteraction`'s existing
+  raycast.
+- `PlayerInteraction.HandleCarryBinding`/`MoveHeldObject` shared-carry averaging,
+  `[E] Help Carry` / `[E] Let Go (Carrying)` prompts.
+- `WeldingTorchFuel` burnout meter (see Remaining Tools) and `BuildTile`'s
+  stillness-pause integration.
+
+**Still to build (Cameron, in-Editor — see `docs/wiring/steel-material-and-welding-torch.md`):**
+- `SteelBeam` prefab (Heavy weight class, `TwoPersonCarry` + attach-point child)
 - `WeldingTorch` prefab
+- Blueprint content: a Steel tile, Steel supply zone, Welding Torch depot
 
 **Dependencies:** `MaterialItem`, `PhysicsPickup`, `PlayerInteraction`, `ToolItem`,
-`ToolStats`
+`ToolStats` — all satisfied.
 
-**Open questions:**
-- How does the second player "bind in" to a heavy carry? Proximity + interact prompt?
-- Is the stillness threshold a velocity value or a full-stop requirement?
-- Does the torch tool have a fuel/durability mechanic or is it permanent?
+**Open questions — resolved:**
+- How does the second player "bind in"? → dedicated attach-point collider
+  (`TwoPersonCarryPoint`), same raycast+interact-prompt pattern as every other
+  interactable, not proximity-based.
+- Is the stillness threshold velocity or full-stop? → full-stop on movement
+  *input* (`InputReader.MoveInput.sqrMagnitude < 0.0001f`), not a
+  `CharacterController` velocity reading — an implementation-detail
+  simplification, flagged for Cameron to revisit if it doesn't feel right.
+- Does the torch have fuel/durability? → yes, a burnout meter (heats while
+  welding, locks out once full, drains while idle) — not unlimited, not
+  consumable/permanent-durability either. See Remaining Tools for tunables.
 
 ---
 
 ### Remaining Tools (Trowel, Welding Torch)
 
-**Trowel:** Medium-weight tool, 2.5s build duration on Concrete tiles.
-**Welding Torch:** Light-weight tool (the player carrying it is slowed — the steel
-beam they're also carrying is what's heavy), 4.0s build duration, requires stillness.
+**Trowel:** Medium-weight tool, 2.5s build duration on Concrete tiles. Not built —
+no prefab, no gameplay.
 
-Both need: prefab, `ToolItem` component, `ToolStats` values, depot spawner entry.
+**Welding Torch — gameplay code built, prefab pending.** Light-weight tool (the
+player carrying it is slowed — the steel beam they're also carrying is what's
+heavy), 4.0s build duration, requires stillness (pause, not cancel — see Steel
+Material above). Also has a burnout meter (`WeldingTorchFuel`,
+`Assets/Scripts/Build/WeldingTorchFuel.cs`): `maxHeat` 8s (placeholder) of
+continuous welding before it overheats and locks out for `cooldownDuration` 4s
+(placeholder); drains at `drainRate` 1/sec any time it isn't actively welding,
+not just during the cooldown, so short bursts recover between builds.
+`BuildTile.ContinueBuildRpc`/`BuildTickCoroutine` calls `TryHeat()` once per
+build tick and withholds progress (without resetting it) for any tick it
+returns `false`. Needs: prefab, `ToolItem` component (code already supports
+`ToolType.Torch`), depot spawner entry.
 
 ---
 
@@ -454,20 +493,34 @@ based on how many players are in the session.
 
 ---
 
-## Weight Classes and Speed Penalties
+## Weight Classes and Speed Penalties — Built
 
 **What it is:** Movement speed modifier applied when carrying objects above Light
 weight class.
 
 **Decisions made:**
 - Light: no penalty
-- Medium: minor penalty (specific value TBD)
-- Heavy: 75% speed reduction
+- Medium: minor penalty — implemented as a placeholder `0.85` multiplier
+  (`PlayerController.mediumWeightMultiplier`, `[Range(0,1)]`, Cameron to tune —
+  no material uses Medium yet, so there's nothing to playtest the feel against)
+- Heavy: 75% speed reduction — `heavyWeightMultiplier = 0.25f`
+- A shared two-player carry (`TwoPersonCarry.IsShared`) drops the penalty to
+  1.0 for both carriers regardless of weight class — "no penalty once shared"
 
-**What to build:**
-- Speed multiplier applied in `PlayerController` based on held object's weight class
-- `PhysicsPickup` exposes `WeightClass` to `PlayerInteraction`
-- `PlayerController` reads current weight and applies multiplier
+**Built:**
+- `WeightClass` enum (`Assets/Scripts/Blueprint/BlueprintEnums.cs`)
+- `PhysicsPickup.weightClass` `[SerializeField]` + `Weight` property
+  (`Assets/Scripts/PhysicsPickup.cs`)
+- `PlayerController.CurrentWeightMultiplier()` (`Assets/Scripts/PlayerController.cs`)
+  reads `PlayerInteraction.HeldObject`, checks for a shared `TwoPersonCarry`
+  first, then maps `WeightClass` to a multiplier; applied to both walk and
+  sprint speed in `Move()`.
+
+**Wiring needed:** `PlayerController.playerInteraction` is unassigned on
+`Player.prefab` (both components already live on the prefab root) — see
+`docs/wiring/steel-material-and-welding-torch.md`. No material currently uses
+`Medium` (Concrete, the only planned Medium material, isn't built yet), so this
+system is exercised today only by Heavy (Steel, once its prefab exists).
 
 **Dependencies:** `PlayerController`, `PlayerInteraction`, `PhysicsPickup`,
-`MaterialItem`/`ToolItem`
+`MaterialItem`/`ToolItem` — all satisfied.

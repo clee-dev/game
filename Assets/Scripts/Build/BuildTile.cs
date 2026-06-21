@@ -85,6 +85,11 @@ public class BuildTile : NetworkBehaviour
     private float _lastPingTime;
     private Coroutine _buildCoroutine;
 
+    // Server-only -- Welding Torch specifics (PLANNED_FEATURES.md, Steel Material).
+    // _lastPingWasStill only matters for RequiredTool == Torch; every other tool ignores it.
+    private bool _lastPingWasStill = true;
+    private WeldingTorchFuel _activeTorchFuel;
+
     // -------------------------------------------------------------------------
     // Lifecycle
     // -------------------------------------------------------------------------
@@ -280,8 +285,12 @@ public class BuildTile : NetworkBehaviour
     public bool CanBuild(ToolType heldTool) =>
         _state.Value == TileState.MaterialPlaced && heldTool == RequiredTool;
 
+    /// <summary>isStill and toolRef only matter for a Torch build: isStill drives the
+    /// "pause, don't cancel" stillness requirement, and toolRef identifies which physical
+    /// torch's WeldingTorchFuel burnout meter this tick should heat (PLANNED_FEATURES.md,
+    /// Steel Material). Both are ignored for every other ToolType.</summary>
     [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
-    public void ContinueBuildRpc(ulong clientId, ToolType heldTool)
+    public void ContinueBuildRpc(ulong clientId, ToolType heldTool, bool isStill, NetworkObjectReference toolRef)
     {
         if (!CanBuild(heldTool)) return;
 
@@ -292,6 +301,10 @@ public class BuildTile : NetworkBehaviour
         }
 
         _lastPingTime = Time.time;
+        _lastPingWasStill = isStill;
+        _activeTorchFuel = heldTool == ToolType.Torch && toolRef.TryGet(out NetworkObject toolObj)
+            ? toolObj.GetComponent<WeldingTorchFuel>()
+            : null;
 
         if (_buildCoroutine == null)
             _buildCoroutine = StartCoroutine(BuildTickCoroutine());
@@ -309,12 +322,22 @@ public class BuildTile : NetworkBehaviour
                 yield break;
             }
 
-            _buildProgress.Value += Time.deltaTime;
+            // Torch-only: moving while welding pauses progress instead of resetting it
+            // (PLANNED_FEATURES.md -- "pause, don't cancel"). Heat only climbs on ticks
+            // that actually advance progress, so standing still mid-build but already
+            // overheated still withholds progress until the burnout meter clears.
+            bool stillnessPaused = RequiredTool == ToolType.Torch && !_lastPingWasStill;
+            bool overheated = !stillnessPaused && _activeTorchFuel != null && !_activeTorchFuel.TryHeat(Time.deltaTime);
 
-            if (_buildProgress.Value >= duration)
+            if (!stillnessPaused && !overheated)
             {
-                CompleteBuild();
-                yield break;
+                _buildProgress.Value += Time.deltaTime;
+
+                if (_buildProgress.Value >= duration)
+                {
+                    CompleteBuild();
+                    yield break;
+                }
             }
 
             yield return null;
@@ -328,6 +351,7 @@ public class BuildTile : NetworkBehaviour
         _buildProgress.Value = 0f;
         _buildingClientId.Value = NoBuilder;
         _buildCoroutine = null;
+        _activeTorchFuel = null;
     }
 
     private void CompleteBuild()
@@ -341,6 +365,7 @@ public class BuildTile : NetworkBehaviour
         _buildProgress.Value = 0f;
         _buildingClientId.Value = NoBuilder;
         _buildCoroutine = null;
+        _activeTorchFuel = null;
         _state.Value = TileState.Built;
     }
 
@@ -372,6 +397,7 @@ public class BuildTile : NetworkBehaviour
 
         _buildProgress.Value = 0f;
         _buildingClientId.Value = NoBuilder;
+        _activeTorchFuel = null;
         _state.Value = TileState.Destroyed;
     }
 

@@ -26,6 +26,12 @@ public class PhysicsPickup : NetworkBehaviour
     /// <summary>Fires on every machine whenever the held state changes (true = now held).</summary>
     public event Action<bool> HeldStateChanged;
 
+    [Tooltip("How much this item slows its solo carrier down -- see PlayerController. " +
+             "Shared two-player carry (TwoPersonCarry) overrides this back to no penalty.")]
+    [SerializeField] private WeightClass weightClass = WeightClass.Light;
+
+    public WeightClass Weight => weightClass;
+
     // Anything that clips through a gap in the level (a missing collider, a thrown item
     // that tunnels through thin geometry, etc.) just falls forever otherwise -- that's a
     // permanent, invisible slot eaten out of the material cap and a potential softlock if
@@ -33,9 +39,14 @@ public class PhysicsPickup : NetworkBehaviour
     [Tooltip("Despawned automatically once it falls below this Y, server-side only.")]
     [SerializeField] private float fallDespawnY = -40f;
 
+    // Optional -- only present on Heavy items that support a second carrier binding in
+    // (e.g. SteelBeam). Looked up once since RequestDropServerRpc needs it on every drop.
+    private TwoPersonCarry _twoPersonCarry;
+
     private void Awake()
     {
         _rb = GetComponent<Rigidbody>();
+        _twoPersonCarry = GetComponent<TwoPersonCarry>();
     }
 
     public override void OnNetworkSpawn()
@@ -99,10 +110,18 @@ public class PhysicsPickup : NetworkBehaviour
 
     /// <summary>
     /// Only the current owner (holder) can drop. Host takes ownership back and applies throw.
+    ///
+    /// If this item is being shared (TwoPersonCarry.IsShared), the primary letting go is a
+    /// handoff, not a real drop: the secondary becomes the new primary and keeps carrying it
+    /// solo (PLANNED_FEATURES.md, Steel Material -- "secondary becomes primary"), so it never
+    /// touches physics or _isHeld at all.
     /// </summary>
     [ServerRpc]
     public void RequestDropServerRpc(Vector3 throwVelocity)
     {
+        if (_twoPersonCarry != null && _twoPersonCarry.TryHandoffToSecondary())
+            return;
+
         _isHeld.Value = false;
 
         // Return ownership to host so host simulates the throw physics
