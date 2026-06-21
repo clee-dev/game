@@ -72,10 +72,16 @@ together before it can be placed.
 
 **Decisions made:**
 - Weight class: Heavy — 75% movement speed reduction when held solo
-- Two-player shared carry: second player binds in, movement averages between both,
-  either can release independently
-- If the primary releases while shared, the secondary becomes the new primary
+- Two-player shared carry via two interchangeable attach points (no fixed
+  primary/secondary point — either player can grab either one); movement
+  averages between both, either can release independently
+- If the owner releases while shared, the other holder becomes the new owner
   (ownership handoff, not a drop)
+- Carry orientation follows the line between the two carriers' body
+  positions, not either carrier's facing — looking around while stationary
+  doesn't spin the carried item
+- Drifting more than `maxShareDistance` apart while shared auto-releases the
+  non-owner side
 - Tool: Welding Torch (requires stillness during build interaction)
 - Build duration: 4.0s (slower than Hammer/Trowel)
 - Torch has a burnout meter, not unlimited use (resolves the fuel/durability
@@ -86,22 +92,34 @@ together before it can be placed.
   any future Medium/Heavy material, not Steel-specific.
 - `PhysicsPickup.Weight` exposes it per-prefab; `PlayerController.CurrentWeightMultiplier()`
   applies it to walk/sprint speed (see Weight Classes and Speed Penalties below).
-- `TwoPersonCarry` (`Assets/Scripts/TwoPersonCarry.cs`) — `NetworkVariable<ulong>`
-  secondary-holder id, `RequestBindSecondaryRpc`/`RequestUnbindSecondaryRpc`,
-  `TryHandoffToSecondary()` (called from `PhysicsPickup.RequestDropServerRpc`
-  when the primary releases while shared). `CarryPointFor(Transform)` derives
-  each carrier's carry point from their body root (not camera/holdPoint) — see
+- `TwoPersonCarry` (`Assets/Scripts/TwoPersonCarry.cs`) — symmetric two-point
+  redesign (latest session): two `NetworkVariable<ulong>` holder slots
+  (`_holderA`/`_holderB`, one per `TwoPersonCarryPoint.pointIndex`, no fixed
+  primary/secondary), `RequestBindRpc(clientId, pointIndex)`/`RequestUnbindRpc`,
+  `TryHandoffOnOwnerRelease(ulong)` (called from
+  `PhysicsPickup.RequestDropServerRpc` when the owner releases while shared),
+  a server-only `Update()` auto-releasing the non-owner side past
+  `maxShareDistance`. `CarryPointFor(Transform)` derives each carrier's carry
+  point from their body root (not camera/holdPoint) — see
   `docs/ARCHITECTURE.md` Interaction & Pickup for why.
-- `TwoPersonCarryPoint` (`Assets/Scripts/TwoPersonCarryPoint.cs`) — marker on a
-  separate attach-point collider, resolved by `PlayerInteraction`'s existing
-  raycast.
-- `PlayerInteraction.HandleCarryBinding`/`MoveHeldObject` shared-carry averaging,
-  `[E] Help Carry` / `[E] Let Go (Carrying)` prompts.
+- `TwoPersonCarryPoint` (`Assets/Scripts/TwoPersonCarryPoint.cs`) — marker on
+  one of two interchangeable attach-point colliders (`pointIndex` 0/1),
+  resolved by `PlayerInteraction`'s existing raycast.
+- `PlayerInteraction.HandleCarryBinding`/`MoveHeldObject` shared-carry
+  averaging (rotation now from carrier body positions, not facing — fixes
+  rotation jank while a stationary carrier looks around),
+  `ReconcileCarryHandoff` (promotes a bound carrier to full holder after an
+  ownership handoff), `[E] Pick Up` / `[E] Help Carry` / `[E] Let Go (Carrying)`
+  prompts. Generic body-collider pickup (`TryPickup`) refuses any item with a
+  `TwoPersonCarry` component — must go through an attach point.
 - `WeldingTorchFuel` burnout meter (see Remaining Tools) and `BuildTile`'s
   stillness-pause integration.
 
-**Still to build (Cameron, in-Editor — see `docs/wiring/steel-material-and-welding-torch.md`):**
-- `SteelBeam` prefab (Heavy weight class, `TwoPersonCarry` + attach-point child)
+**Still to build (Cameron, in-Editor — see
+`docs/wiring/steel-material-and-welding-torch.md` and
+`docs/wiring/steel-two-person-carry-points.md`):**
+- `Steel.prefab` needs a *second* `TwoPersonCarryPoint` child (it currently
+  has one, built before the symmetric redesign) plus `pointIndex` set on both
 - `WeldingTorch` prefab
 - Blueprint content: a Steel tile, Steel supply zone, Welding Torch depot
 
