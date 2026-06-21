@@ -1290,6 +1290,57 @@ in-gameplay pause overlay, see "Pause Menu" below).
 
 `GameEvents` static event bus: `OnGameStarted`, `OnGamePaused`, `OnGameResumed`.
 
+**Established "press E" menu pattern (Canvas-based) — Order menu is the
+reference implementation.** `Player.prefab`'s always-active `Canvas`
+GameObject carries a small toggler script (`OrderMenuPanel.cs`) that reads
+`PlayerInteraction.IsOrderMenuOpen` every frame and flips a child panel
+(`menuUI`, 3 fixed buttons for Wood/Concrete/Steel) active/inactive — a
+disabled GameObject's own `Update()` never runs, so the toggler has to live on
+something that's always active. Each button's `OnClick` calls
+`PlayerInteraction.SelectOrderOption(int)`/`CloseOrderMenu()` directly; these
+are public specifically so a UI `Button` can wire to them (doc comment in
+`PlayerInteraction.cs` above `SelectOrderOption`). Number-key selection
+(`HandleOrderMenuSelection`) funnels through the same `SelectOrderOption`
+call, so a click and a keypress behave identically.
+
+**Found and fixed this session: a duplicate-rendering bug.**
+`PlayerInteraction.OnGUI()` was *also* drawing an old immediate-mode
+`DrawOrderMenu()` box+label list every time the Order menu opened, on top of
+the already-working Canvas buttons above. The two were never reconciled after
+the Canvas version was built. `DrawOrderMenu()` and its `OnGUI()` call are
+deleted — the Canvas version was already fully functional and is the only one
+that should exist.
+
+**Kiosk (`LevelSelectKiosk`) and Hub Terminal (`HubTerminal`) menus are not yet
+migrated to this pattern** — they still render via OnGUI
+(`DrawKioskMenu()`/`DrawTerminalMenu()`), left in place as a working fallback
+(removing it without a finished replacement would have been a real
+regression, unlike the Order menu case where the replacement already existed
+and worked). `KioskMenuPanel.cs`/`TerminalMenuPanel.cs` (new this session) are
+code-complete equivalents of `OrderMenuPanel.cs` — a fixed 9-row panel
+(matching the existing number-key selection cap), with `PlayerInteraction`
+gaining the small public getters they need
+(`TerminalHighlightedIndex`/`TerminalFlashActive`, alongside the
+already-existing `IsKioskMenuOpen`/`OpenKioskMenuTarget`/
+`IsTerminalMenuOpen`/`OpenTerminalMenuTarget`). **The Canvas hierarchy and
+Button.OnClick wiring are Editor-only steps** — `Button.OnClick` persistent
+listeners can't be set through the available automated Editor tooling (tested
+and confirmed: a `set_component_property` call against `Button.onClick`
+silently no-ops, the listener list stays empty). See
+`docs/wiring/kiosk-terminal-canvas-menus.md` for exact steps (duplicate the
+working Order menu structure and relabel). Once both are wired and confirmed
+working, delete the OnGUI fallback the same way `DrawOrderMenu()` was deleted.
+
+**Crosshair, Torch heat meter, delivery queue, and debug-demolish hint remain
+OnGUI** — simple screen-space HUD overlays, not "press E, pick from a list"
+menus, so they're a separate and lower-priority follow-up from the menu work
+above. `LevelEditorUI`'s tool panels are also still OnGUI, and its own doc
+comment explicitly declares this a deliberate design choice ("needs no
+Canvas/Button hierarchy to be usable") — converting it would be reversing an
+explicit prior decision, not just finishing in-progress work, so it needs
+Cameron's confirmation before any Canvas migration there (see "Pause Menu"
+section above for the prior, still-unresolved flag on this same tension).
+
 ---
 
 ### Shaders

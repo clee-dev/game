@@ -634,8 +634,10 @@ public class PlayerInteraction : NetworkBehaviour
     // separate E press -- so the lock-in flash is visible and browsing can continue.
     // -------------------------------------------------------------------------
 
-    public bool        IsTerminalMenuOpen     => _openTerminalMenuTarget != null;
-    public HubTerminal OpenTerminalMenuTarget => _openTerminalMenuTarget;
+    public bool        IsTerminalMenuOpen        => _openTerminalMenuTarget != null;
+    public HubTerminal OpenTerminalMenuTarget    => _openTerminalMenuTarget;
+    public int          TerminalHighlightedIndex => _terminalHighlightedIndex;
+    public bool          TerminalFlashActive     => _terminalFlashTimer > 0f;
 
     private const float TerminalFlashDuration = 1.5f;
 
@@ -795,7 +797,6 @@ public class PlayerInteraction : NetworkBehaviour
 
         DrawCrosshair();
         DrawOrderQueue();
-        DrawOrderMenu();
         DrawKioskMenu();
         DrawTerminalMenu();
         DrawDebugDemolishHint();
@@ -887,40 +888,19 @@ public class PlayerInteraction : NetworkBehaviour
     }
 
     // -------------------------------------------------------------------------
-    // Order menu rendering -- a small list of selectable materials centered
-    // below the crosshair while _openOrderMenuTarget is set.
+    // Kiosk / Hub Terminal menu rendering -- OnGUI fallback, kept until the
+    // Canvas-based replacement (KioskMenuPanel.cs / TerminalMenuPanel.cs, plus
+    // Player.prefab Canvas panels matching the Order menu's existing "menuUI" +
+    // OrderMenuPanel pattern) is wired in the Editor. See
+    // docs/wiring/kiosk-terminal-canvas-menus.md -- Button.OnClick persistent
+    // listeners can't be wired through the available automated tooling, so this
+    // is an Editor-only step. Delete this OnGUI block once that's done and
+    // confirmed working, same as the Order menu's now-removed DrawOrderMenu.
     // -------------------------------------------------------------------------
 
     private const float MenuWidth      = 220f;
     private const float MenuLineHeight = 22f;
     private const float MenuPadding    = 8f;
-
-    private void DrawOrderMenu()
-    {
-        if (_openOrderMenuTarget == null) return;
-
-        int count = _openOrderMenuTarget.MaterialCount;
-        float height = MenuPadding * 2f + MenuLineHeight * (count + 1);
-        var area = new Rect(
-            Screen.width * 0.5f - MenuWidth * 0.5f,
-            Screen.height * 0.5f + 20f,
-            MenuWidth, height);
-
-        GUI.Box(area, "Order Materials");
-        for (int i = 0; i < count; i++)
-        {
-            var lineRect = new Rect(
-                area.x + MenuPadding,
-                area.y + MenuPadding + MenuLineHeight * (i + 1),
-                MenuWidth - MenuPadding * 2f, MenuLineHeight);
-            GUI.Label(lineRect, $"[{i + 1}] {_openOrderMenuTarget.DescribeOption(i)}");
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Kiosk menu rendering -- same layout as the order menu, listing blueprints
-    // instead of materials while _openKioskMenuTarget is set.
-    // -------------------------------------------------------------------------
 
     private void DrawKioskMenu()
     {
@@ -943,13 +923,6 @@ public class PlayerInteraction : NetworkBehaviour
             GUI.Label(lineRect, $"[{i + 1}] {_openKioskMenuTarget.DescribeOption(i)}");
         }
     }
-
-    // -------------------------------------------------------------------------
-    // Hub Terminal menu rendering -- same Box/Label layout as the order/kiosk
-    // menus, plus a two-line-per-row detail string (tile count / materials /
-    // completion threshold) and a small top-down preview texture for whichever
-    // row is currently highlighted (HubTerminal.GetPreviewTexture).
-    // -------------------------------------------------------------------------
 
     private const float TerminalMenuWidth        = 420f;
     private const float TerminalDetailLineHeight = 16f;

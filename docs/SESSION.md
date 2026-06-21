@@ -1751,3 +1751,113 @@ Both fixes are pure C# — no further Editor/wiring action needed from Cameron.
   axis fix layered on top.
 - `maxShareDistance` (4, still the script default) remains an unvalidated placeholder per the
   prior round's note — no new information on tuning this round.
+
+---
+
+## 2026-06-21
+
+**Context from Cameron:** "perform a sweep across my project and make sure
+everything aligns with the game implementation documents... wiring and
+hooking up all the stuff. I want UI to be consistent instead of a ton of
+scripts creating UI." **First session with live Unity Editor access** (via
+Unity MCP tools) rather than hand-reading/hand-editing YAML blind — every
+finding below was verified by actually inspecting the live project, not by
+reasoning about file contents.
+
+### Wiring sweep result: all 5 previously-pending items already fixed by Cameron
+
+Re-checked every `docs/wiring/*.md` pending task against the live project.
+Cameron had already done all of this himself in the Editor since the last AI
+session, ahead of this one:
+
+- `Trowel.prefab` / `Welding Torch.prefab` — both exist, fully componented
+  (`PhysicsPickup`, `ToolItem` with correct `toolType`, `Welding Torch.prefab`
+  also has `WeldingTorchFuel`), both registered in
+  `DefaultNetworkPrefabs.asset`, both present in the master
+  `ToolDepotSpawner.prefab`'s `toolPrefabs[]` (Hammer + Trowel + Torch, all 3).
+- `TrashBin.prefab` — exists, correctly componented (`NetworkObject`,
+  `BoxCollider`, `TrashBin`), registered in `DefaultNetworkPrefabs.asset`,
+  assigned to `BuildSystem.trashBinPrefab` in `Game1.unity`.
+- `Steel.prefab` — `TwoPersonCarry` present, both `TwoPersonCarryPoint`
+  children present at `pointIndex` 0/1 mirrored at local X `±0.444`/`±0.445`,
+  `PhysicsPickup.weightClass` set to `2` (Heavy). `Player.prefab`'s
+  `PlayerController.playerInteraction` is assigned.
+- `WallMeshSet-Default.asset` — assigned to both `BuildTile.prefab` (already
+  known) and `LevelEditorController.wallMeshSet` in `LevelEditor.unity`
+  (previously pending, now confirmed wired).
+- Zero console errors/warnings at session start (`Unity_GetConsoleLogs`).
+
+No code changes were needed for any of these — confirmed-done, not
+re-actioned. Moved on to the UI consistency request.
+
+### UI consistency: found a real duplicate-rendering bug, fixed it; found the established pattern; extended it partway
+
+Investigating "make UI consistent" surfaced something concrete rather than
+abstract: `Player.prefab` already has a **working Canvas-based Order menu**
+(`menuUI` panel + `OrderMenuPanel.cs` toggler + 3 buttons wired to
+`PlayerInteraction.SelectOrderOption`/`CloseOrderMenu`) that Cameron built
+in-Editor and was never documented in `ARCHITECTURE.md`. But
+`PlayerInteraction.OnGUI()` was *also* still calling the old immediate-mode
+`DrawOrderMenu()` every time the menu opened — the two rendered on top of each
+other. Removed `DrawOrderMenu()` and its `OnGUI()` call; the Canvas version
+was already fully functional on its own.
+
+Generalized that same pattern (`*MenuPanel` toggler script reading
+`PlayerInteraction`'s `Is*MenuOpen` state, fixed-row buttons capped at the
+existing 9-option number-key selection limit) for Kiosk and Hub Terminal:
+- New `Assets/Scripts/KioskMenuPanel.cs`, `Assets/Scripts/TerminalMenuPanel.cs`
+  — code-complete, compiled clean.
+- `PlayerInteraction.cs` gained `TerminalHighlightedIndex`/`TerminalFlashActive`
+  public getters (Kiosk's equivalents already existed).
+- **Did not delete the OnGUI Kiosk/Terminal rendering** (unlike Order) —
+  tested whether `Button.OnClick` persistent listeners can be wired through
+  the available Editor automation
+  (`Unity_ManageGameObject.set_component_property` against a throwaway test
+  Button): confirmed it silently no-ops, the listener list stays empty no
+  matter what's passed. Without a working Canvas replacement to swap in,
+  deleting the OnGUI fallback would have been a real regression (menus
+  rendering nothing), not a cleanup — so it's left in place, explicitly
+  documented as temporary, with the Editor-only remaining steps written up in
+  `docs/wiring/kiosk-terminal-canvas-menus.md` (duplicate the proven Order
+  menu structure and relabel — fastest path, avoids inventing new layout).
+- Did not touch crosshair/heat meter/delivery queue/debug-hint OnGUI, or
+  `LevelEditorUI`'s tool panels — flagged in `ARCHITECTURE.md`'s UI section as
+  a separate, lower-priority follow-up. `LevelEditorUI.cs` has a standing doc
+  comment declaring itself OnGUI-only *by design*, which is a previously-
+  flagged, still-unresolved tension (see "Pause Menu" section) — converting it
+  needs Cameron's explicit confirmation, not just continued momentum from this
+  session.
+
+### Changes made this session
+
+- `Assets/Scripts/PlayerInteraction.cs` — removed `DrawOrderMenu()` (dead,
+  duplicate of the working Canvas menu) and its `OnGUI()` call; added
+  `TerminalHighlightedIndex`/`TerminalFlashActive` getters; Kiosk/Terminal
+  OnGUI rendering otherwise unchanged (kept as fallback, not yet replaceable).
+- `Assets/Scripts/KioskMenuPanel.cs`, `Assets/Scripts/TerminalMenuPanel.cs` —
+  new, Canvas-menu togglers mirroring `OrderMenuPanel.cs`.
+- `docs/wiring/kiosk-terminal-canvas-menus.md` — new wiring doc for the
+  Editor-only Canvas/Button steps.
+- `docs/ARCHITECTURE.md` — new "Established 'press E' menu pattern" UI
+  subsection documenting the Order-menu reference implementation, the bug fix,
+  and the Kiosk/Terminal partial migration status.
+
+### Open items for Cameron to review
+
+- Build the Kiosk and Terminal Canvas panels per
+  `docs/wiring/kiosk-terminal-canvas-menus.md`, then delete the OnGUI fallback
+  in `PlayerInteraction.cs` once confirmed working.
+- Judgment call flagged in that doc: Terminal's row `OnClick` would highlight
+  *and* confirm in one click, unlike the keyboard path's two-step
+  highlight-then-Enter. Decide if that's fine or if a separate
+  highlight-only method is wanted.
+- Crosshair/heat meter/delivery queue/debug-hint OnGUI, and `LevelEditorUI`'s
+  OnGUI tool panels, are unconverted by design/deferral — confirm whether
+  Cameron wants those migrated too, given `LevelEditorUI.cs`'s explicit
+  OnGUI-only design comment.
+- This session had live Editor access (Unity MCP) for the first time — all
+  findings above were verified directly (component inspection, prefab reads,
+  console log checks), not hand-reasoned from YAML. No playtest was performed
+  beyond confirming zero compile errors; Cameron should still playtest the
+  Order menu fix (confirm only the Canvas buttons render now, no leftover
+  OnGUI box) before relying on it.
