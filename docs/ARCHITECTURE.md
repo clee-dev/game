@@ -105,6 +105,18 @@ list) when Steam isn't initialized.
 ### Player
 
 `PlayerController` — CharacterController movement, gravity, jump, sprint.
+**Weight-based speed penalty (this session):** gained a `playerInteraction`
+reference and `CurrentWeightMultiplier()`, multiplied into both walk and sprint
+speed in `Move()`. Reads whatever `PlayerInteraction.HeldObject` currently is;
+`PhysicsPickup.Weight` (`WeightClass.Light/Medium/Heavy`, set per-prefab) maps
+to 1.0 / `mediumWeightMultiplier` (0.85, placeholder) / `heavyWeightMultiplier`
+(0.25, the 75% reduction `PLANNED_FEATURES.md` specifies for Steel). A held
+object whose `TwoPersonCarry.IsShared` is true always returns 1.0 regardless of
+weight class — "no penalty once shared" per spec — checked directly in
+`CurrentWeightMultiplier()` rather than in `PhysicsPickup`, so all penalty
+logic stays on the carrier side. **Wiring needed:** `playerInteraction` is
+unassigned on `Player.prefab` (both components already live on the same prefab
+root) — see `docs/wiring/steel-material-and-welding-torch.md`.
 
 `PlayerCamera` — mouse look. Does NOT auto-lock cursor. Subscribes to
 `GameEvents.OnGameStarted/Paused/Resumed` to enable/disable mouse look.
@@ -226,6 +238,56 @@ Hover / PlaceValid / PlaceInvalid / Build`):
   bars described above — kept to what `OnGUI`'s existing immediate-mode style
   already does, no new Canvas/Image/texture asset added.
 
+**Two-player shared carry binding (this session).** The per-frame raycast also
+resolves a `TwoPersonCarryPoint` (`hitCollider.GetComponentInParent<TwoPersonCarryPoint>()`)
+alongside the existing targets. `HandleCarryBinding()` lets a second player
+press `[E]` on a held heavy item's dedicated attach-point collider to bind in
+via `TwoPersonCarry.RequestBindSecondaryRpc`, and lets either carrier release
+independently (`_boundCarry` tracks the local secondary-carrier state;
+pressing `[E]` again calls `RequestUnbindSecondaryRpc`). `MoveHeldObject()`
+branches on `TwoPersonCarry.IsShared`: when shared, the held object's position
+is the midpoint between both carriers' `TwoPersonCarry.CarryPointFor(bodyTransform)`
+(primary's own `transform` plus the secondary's body transform, fetched via
+`NetworkManager.Singleton.SpawnManager.GetPlayerNetworkObject(clientId)`)
+instead of the usual `holdPoint`.
+- **Why body transform, not `holdPoint`/camera:** `PlayerCamera` (and
+  therefore `holdPoint`, which follows camera pitch) is disabled entirely on
+  every non-owner client (`NetworkPlayer.ApplyComponentState`) and never
+  networked, so a remote carrier's camera-derived point is unreliable to read
+  from another client. Only the player body root's position + horizontal
+  rotation replicate reliably (`ClientNetworkTransform`), so both carriers'
+  carry points are computed the same way — body position plus a fixed
+  forward/height offset, ignoring pitch — for symmetry. The primary's
+  `ClientNetworkTransform` ownership keeps driving the one replicated write
+  either way; the secondary's body transform is only ever read, never written.
+- **Release/handoff** is split across two files: a secondary releasing only
+  calls `RequestUnbindSecondaryRpc` (no effect on the primary). The primary
+  releasing while shared instead goes through `PhysicsPickup.RequestDropServerRpc`,
+  which now checks `TwoPersonCarry.TryHandoffToSecondary()` first — if shared,
+  this transfers `NetworkObject` ownership to the secondary and returns early,
+  completely bypassing the normal throw/ownership-to-server drop path, so "the
+  secondary becomes the new primary" needs no special-casing at the
+  `PlayerInteraction` call site.
+
+**Welding Torch heat meter (`DrawTorchHeatMeter`, this session).** `OnGUI`
+draws a small heat bar centered low on screen whenever the locally held item
+has both a `ToolItem` of type `Torch` and a `WeldingTorchFuel`, lerping
+green→red with `WeldingTorchFuel.HeatFraction` and switching to a red
+"Overheated" label while `IsOverheated`. Same `Texture2D.whiteTexture` /
+immediate-mode `OnGUI` approach as the rest of the crosshair/feedback system —
+no Canvas/Image asset.
+
+**Build stillness signal (this session).** `HandleContinuousBuild` now computes
+`isStill = _input.MoveInput.sqrMagnitude < 0.0001f` and passes it (plus
+`tool.NetworkObject` as a `NetworkObjectReference`) into
+`BuildTile.ContinueBuildRpc` every tick. Only `ToolType.Torch` builds read this
+signal server-side (see Build Tiles section below) — Hammer/Trowel builds
+ignore it entirely. Chosen as a movement-input check rather than a
+`CharacterController`-velocity threshold: simpler (no new reference needed on
+`PlayerInteraction`) and more predictable for players (input release reads as
+instant, not threshold-dependent). Flagging as an implementation-detail
+default, not a design call, in case Cameron wants a velocity-based feel instead.
+
 ---
 
 ### Materials
@@ -236,9 +298,17 @@ Hover / PlaceValid / PlaceInvalid / Build`):
 Currently implemented:
 - **Wood** — Light weight, Hammer tool, full prefab + built prefab (`WoodPlank`)
 
-Defined but not yet implemented:
+**Steel — gameplay code implemented this session, prefab not yet built.**
+Heavy weight (`PhysicsPickup.Weight = WeightClass.Heavy`, 75% solo speed
+penalty via `PlayerController`), Welding Torch tool. Also the first material
+to use `TwoPersonCarry` (see Interaction & Pickup above) — a second player can
+bind to a dedicated attach-point collider to share the carry and remove the
+speed penalty for both. No `SteelBeam.prefab` exists yet, and no blueprint
+currently places a Steel tile/supply zone — see
+`docs/wiring/steel-material-and-welding-torch.md`.
+
+Defined but not yet implemented at all:
 - **Concrete** — Medium weight, Trowel tool (no prefab, no gameplay)
-- **Steel** — Heavy weight, Welding Torch tool (no prefab, no gameplay)
 - **Any** — defined in `MaterialType` enum
 
 ---
@@ -251,8 +321,22 @@ Torch 4.0s.
 Currently implemented:
 - **Hammer** — full prefab, works in gameplay
 
-Currently defined but not implemented:
-- Trowel, Welding Torch — no prefabs, no gameplay
+**Welding Torch — gameplay code implemented this session, prefab not yet
+built.** `WeldingTorchFuel` (sits alongside `ToolItem` + `PhysicsPickup` on the
+eventual `WeldingTorch.prefab`) tracks a server-authoritative heat meter:
+`TryHeat(deltaTime)` is called once per build tick by `BuildTile` while this
+specific torch instance drives a Torch build, accumulating heat and returning
+`false` once `maxHeat` (8s placeholder) is hit, which locks the torch out for
+`cooldownDuration` (4s placeholder) before it can heat again. Heat drains at
+`drainRate`/sec any time the torch isn't actively welding (not just during the
+lockout), so short bursts recover between builds rather than only resetting
+after a full overheat. See Build Tiles below for how `BuildTile` integrates
+this plus the separate "pause not cancel" stillness requirement. No
+`WeldingTorch.prefab` exists yet — see
+`docs/wiring/steel-material-and-welding-torch.md`.
+
+Currently defined but not implemented at all:
+- Trowel — no prefab, no gameplay
 
 `ToolDepotSpawner` — server-only. `toolPrefabs` array + `Configure(string[]
 toolTypeNames)`. One depot can offer multiple tool types per blueprint. Tool types
@@ -333,6 +417,45 @@ pointing `ghostRenderer` at a non-transparent material, which is presumably why
 ghosts previously didn't read as ghostly) to a new `ToonTransparentGhost.mat`
 (uses `ToonTransparent.shader`, `_BaseColor` alpha 0.3) so the per-material tint
 is actually visible through transparency instead of solid-colored.
+
+**Welding Torch build integration (this session).** `ContinueBuildRpc` gained
+two parameters: `bool isStill` (computed by `PlayerInteraction`, see
+Interaction & Pickup above) and `NetworkObjectReference toolRef` (the held
+tool's `NetworkObject`, used to resolve a specific `WeldingTorchFuel` instance
+since `BuildTile` otherwise only knows the held `ToolType`, not which physical
+tool object is driving the build). Two independent gates run per tick inside
+`BuildTickCoroutine`, both `ToolType.Torch`-only — Hammer/Trowel builds are
+unaffected by either:
+- **Stillness pause, not cancel.** If the last ping's `isStill` was `false`
+  (player was moving while welding), that tick's `_buildProgress` increment is
+  skipped entirely, but progress is **not** reset and the coroutine keeps
+  running — distinct from the existing `BuildPingGrace` reset-on-no-ping
+  behavior, which still applies unchanged (stop interacting entirely for
+  >0.3s and progress resets as before; standing still while still holding the
+  interact button never resets it).
+- **Overheat lockout.** `_activeTorchFuel.TryHeat(Time.deltaTime)` returning
+  `false` likewise skips that tick's progress increment without resetting it.
+  `_activeTorchFuel` is resolved once per `ContinueBuildRpc` call (via
+  `toolRef.TryGet` + `GetComponent<WeldingTorchFuel>()`) and cleared in
+  `ResetBuildProgress()`, `CompleteBuild()`, and `Collapse()`.
+- Both checks are no-ops for non-Torch builds — `RequiredTool != ToolType.Torch`
+  short-circuits the stillness gate, and `_activeTorchFuel` is only ever
+  non-null while an active Torch build is in progress.
+
+**Unverified — no Unity Editor or C# compiler available this session.** The
+entire Weight Classes / Two-Person Carry / Welding Torch burnout feature set
+(`WeightClass` enum, `PlayerController.CurrentWeightMultiplier`,
+`TwoPersonCarry`, `TwoPersonCarryPoint`, `WeldingTorchFuel`, and the
+`PlayerInteraction`/`BuildTile` integration described above) was hand-verified
+by direct read only, never compiled. No `SteelBeam.prefab`/`WeldingTorch.prefab`
+exist yet to playtest against — see `docs/wiring/steel-material-and-welding-torch.md`.
+Once those prefabs exist, please confirm: solo-carrying a Steel item slows
+movement to 25%; a second player binding via the attach point restores both
+carriers to full speed; either carrier releasing independently works, and the
+primary releasing while shared hands ownership to the secondary instead of
+dropping the item; a Torch build pauses (not resets) progress while the
+welder moves and resumes when they stop; ~8s of continuous welding overheats
+the torch and locks it out for ~4s before it can be used again.
 
 ---
 
@@ -1068,9 +1191,10 @@ Kept in repo but not part of the live flow:
 ## Known Gaps vs Design Docs
 
 Designed but not yet in code:
-- Weight classes / movement speed penalties for carried objects
-- Two-player shared carry for heavy items
-- Concrete (cement + water, hardening timer) and Steel materials/tools
+- Concrete (cement + water, hardening timer) material/tool
+- Steel/Welding Torch prefabs and blueprint content (gameplay code exists —
+  see Materials/Tools/Build Tiles/Interaction & Pickup above; just no
+  `SteelBeam.prefab`/`WeldingTorch.prefab` or blueprint placements yet)
 - Contracts, timer, win/loss, payout
 - Economy (shared money pool, company fee) and shop
 - Chaos event framework and any individual event

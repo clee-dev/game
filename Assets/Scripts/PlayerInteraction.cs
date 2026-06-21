@@ -41,6 +41,16 @@ public class PlayerInteraction : NetworkBehaviour
     private LevelSelectKiosk _openKioskMenuTarget;
     private HubTerminal      _openTerminalMenuTarget;
 
+    /// <summary>Read by PlayerController to apply the held item's weight-class speed
+    /// penalty. Null for a player currently bound as a secondary carrier (see
+    /// _boundCarry) -- that's intentional, since shared carry has no penalty anyway.</summary>
+    public PhysicsPickup HeldObject => _heldObject;
+
+    // Set when this player has bound in as the *secondary* carrier of a TwoPersonCarry
+    // item (e.g. grabbed a SteelBeam's attach point while someone else already holds it).
+    // Distinct from _heldObject: the secondary never becomes the PhysicsPickup's owner.
+    private TwoPersonCarry _boundCarry;
+
     // Reused every frame for MaterialPropertyBlock writes -- never allocate one in Update.
     private MaterialPropertyBlock _mpb;
     private BuildTile             _lastGhostTarget;
@@ -69,7 +79,8 @@ public class PlayerInteraction : NetworkBehaviour
         HubTerminal      terminalTarget = hitCollider != null ? hitCollider.GetComponentInParent<HubTerminal>()   : null;
         TrashBin         trashTarget  = hitCollider != null ? hitCollider.GetComponentInParent<TrashBin>()         : null;
         LevelEditorAccessPoint editorAccessTarget = hitCollider != null ? hitCollider.GetComponentInParent<LevelEditorAccessPoint>() : null;
-        EvaluateFeedback(tileTarget, pickupTarget, orderTarget, kioskTarget, terminalTarget, trashTarget, editorAccessTarget);
+        TwoPersonCarryPoint attachTarget = hitCollider != null ? hitCollider.GetComponentInParent<TwoPersonCarryPoint>() : null;
+        EvaluateFeedback(tileTarget, pickupTarget, orderTarget, kioskTarget, terminalTarget, trashTarget, editorAccessTarget, attachTarget);
 
         _debugDemolishTarget = IsServer && tileTarget != null &&
             (tileTarget.State == TileState.MaterialPlaced || tileTarget.State == TileState.Built)
@@ -84,9 +95,10 @@ public class PlayerInteraction : NetworkBehaviour
 
         if (_terminalFlashTimer > 0f) _terminalFlashTimer -= Time.deltaTime;
 
-        UpdatePrompt(tileTarget, orderTarget, kioskTarget, terminalTarget, trashTarget, editorAccessTarget);
+        UpdatePrompt(tileTarget, orderTarget, kioskTarget, terminalTarget, trashTarget, editorAccessTarget, attachTarget);
         HandleContinuousBuild(tileTarget);
         HandleDebugDemolish();
+        HandleCarryBinding(attachTarget);
         HandleInteractPress(tileTarget, pickupTarget, orderTarget, kioskTarget, terminalTarget, trashTarget, editorAccessTarget);
         HandleOrderMenuSelection();
         HandleKioskMenuSelection();
@@ -122,7 +134,8 @@ public class PlayerInteraction : NetworkBehaviour
     private CrosshairState _crosshairState = CrosshairState.Default;
 
     private void EvaluateFeedback(BuildTile tileTarget, PhysicsPickup pickupTarget,
-        OrderStation orderTarget, LevelSelectKiosk kioskTarget, HubTerminal terminalTarget, TrashBin trashTarget, LevelEditorAccessPoint editorAccessTarget)
+        OrderStation orderTarget, LevelSelectKiosk kioskTarget, HubTerminal terminalTarget, TrashBin trashTarget,
+        LevelEditorAccessPoint editorAccessTarget, TwoPersonCarryPoint attachTarget)
     {
         CrosshairState newState = CrosshairState.Default;
         BuildTile ghostTarget = null;
@@ -157,6 +170,11 @@ public class PlayerInteraction : NetworkBehaviour
         {
             newState = CrosshairState.Hover;
             outlineTarget = pickupTarget.GetComponentInChildren<Renderer>();
+        }
+        else if (attachTarget != null && _heldObject == null && _boundCarry == null && attachTarget.Carry.CanBind(OwnerClientId))
+        {
+            newState = CrosshairState.Hover;
+            outlineTarget = attachTarget.GetComponentInChildren<Renderer>();
         }
         else if (tileTarget != null || orderTarget != null || kioskTarget != null || terminalTarget != null || trashTarget != null || editorAccessTarget != null)
         {
@@ -229,9 +247,39 @@ public class PlayerInteraction : NetworkBehaviour
     {
         if (_heldObject == null) return;
 
+        // Shared carry (TwoPersonCarry.IsShared): average both carriers' body-root-derived
+        // carry points instead of snapping to our own holdPoint. We're the primary here
+        // (the secondary never sets _heldObject), and as the PhysicsPickup's NetworkObject
+        // owner we're the only one whose ClientNetworkTransform write actually replicates --
+        // so this still has to run on our machine even though half the input is the other
+        // player's transform.
+        var carry = _heldObject.GetComponent<TwoPersonCarry>();
+        if (carry != null && carry.IsShared)
+        {
+            Transform secondaryBody = GetCarrierBodyTransform(carry.SecondaryHolderId);
+            if (secondaryBody != null)
+            {
+                Vector3 midpoint = (carry.CarryPointFor(transform) + carry.CarryPointFor(secondaryBody)) * 0.5f;
+                Vector3 facing = transform.forward + secondaryBody.forward;
+                Quaternion rotation = facing.sqrMagnitude > 0.0001f ? Quaternion.LookRotation(facing) : transform.rotation;
+                _heldObject.transform.SetPositionAndRotation(midpoint, rotation);
+                return;
+            }
+        }
+
         // Snap the held object to the hold point each frame.
         // Since we own the object, ClientNetworkTransform syncs this to other clients.
         _heldObject.transform.SetPositionAndRotation(holdPoint.position, holdPoint.rotation);
+    }
+
+    /// <summary>Body-root transform of another connected player, by client ID -- reliable
+    /// to read from any machine (position + horizontal rotation replicate via
+    /// ClientNetworkTransform), unlike that player's camera/holdPoint (see TwoPersonCarry
+    /// remarks). Null if that client has no spawned player object right now.</summary>
+    private static Transform GetCarrierBodyTransform(ulong clientId)
+    {
+        NetworkObject playerObj = NetworkManager.Singleton.SpawnManager.GetPlayerNetworkObject(clientId);
+        return playerObj != null ? playerObj.transform : null;
     }
 
     // -------------------------------------------------------------------------
@@ -245,7 +293,42 @@ public class PlayerInteraction : NetworkBehaviour
         var tool = _heldObject != null ? _heldObject.GetComponent<ToolItem>() : null;
         if (tool == null || !target.CanBuild(tool.Type)) return;
 
-        target.ContinueBuildRpc(OwnerClientId, tool.Type);
+        // Stillness signal for the Welding Torch's "pause, don't cancel" requirement
+        // (PLANNED_FEATURES.md, Steel Material) -- a full-stop on movement input, not a
+        // velocity threshold, so it's a predictable "let go of WASD to weld" rule rather
+        // than something that can flicker on slopes/bumps. Ignored entirely by BuildTile
+        // for every tool except Torch.
+        bool isStill = _input.MoveInput.sqrMagnitude < 0.0001f;
+        target.ContinueBuildRpc(OwnerClientId, tool.Type, isStill, tool.NetworkObject);
+    }
+
+    // -------------------------------------------------------------------------
+    // Two-player carry binding (Section: Steel Material, PLANNED_FEATURES.md). A second
+    // player binds in by interacting with a TwoPersonCarryPoint on a Heavy item someone
+    // else is already carrying. Checked ahead of the main press dispatch below so it can
+    // consume the press itself -- the normal pickup/place/drop flow never sees it.
+    // -------------------------------------------------------------------------
+
+    private void HandleCarryBinding(TwoPersonCarryPoint attachTarget)
+    {
+        if (!_input.InteractPressed) return;
+
+        // Already bound as a secondary carrier -- E always releases that binding first,
+        // regardless of where the player is currently looking (hands are full either way).
+        if (_boundCarry != null)
+        {
+            _input.ConsumeInteract();
+            _boundCarry.RequestUnbindSecondaryRpc(OwnerClientId);
+            _boundCarry = null;
+            return;
+        }
+
+        if (attachTarget == null || _heldObject != null) return;
+        if (!attachTarget.Carry.CanBind(OwnerClientId)) return;
+
+        _input.ConsumeInteract();
+        attachTarget.Carry.RequestBindSecondaryRpc(OwnerClientId);
+        _boundCarry = attachTarget.Carry;
     }
 
     // -------------------------------------------------------------------------
@@ -539,9 +622,22 @@ public class PlayerInteraction : NetworkBehaviour
     // Prompt
     // -------------------------------------------------------------------------
 
-    private void UpdatePrompt(BuildTile target, OrderStation orderTarget, LevelSelectKiosk kioskTarget, HubTerminal terminalTarget, TrashBin trashTarget, LevelEditorAccessPoint editorAccessTarget)
+    private void UpdatePrompt(BuildTile target, OrderStation orderTarget, LevelSelectKiosk kioskTarget, HubTerminal terminalTarget,
+        TrashBin trashTarget, LevelEditorAccessPoint editorAccessTarget, TwoPersonCarryPoint attachTarget)
     {
         if (interactPrompt == null) return;
+
+        if (_boundCarry != null)
+        {
+            interactPrompt.text = "[E] Let Go (Carrying)";
+            return;
+        }
+
+        if (attachTarget != null && _heldObject == null && attachTarget.Carry.CanBind(OwnerClientId))
+        {
+            interactPrompt.text = "[E] Help Carry";
+            return;
+        }
 
         if (editorAccessTarget != null)
         {
@@ -622,6 +718,7 @@ public class PlayerInteraction : NetworkBehaviour
         DrawKioskMenu();
         DrawTerminalMenu();
         DrawDebugDemolishHint();
+        DrawTorchHeatMeter();
     }
 
     private void DrawCrosshair()
@@ -678,6 +775,34 @@ public class PlayerInteraction : NetworkBehaviour
 
         GUI.Label(new Rect(10f, Screen.height - 30f, 460f, 24f),
             "[Backspace] Debug: demolish targeted tile (host only, stand-in for chaos events)");
+    }
+
+    // -------------------------------------------------------------------------
+    // Welding Torch burnout meter -- shown only while holding a Torch, just below the
+    // crosshair (same screen-space approach as the rest of this file's OnGUI feedback).
+    // -------------------------------------------------------------------------
+
+    private const float HeatMeterWidth  = 160f;
+    private const float HeatMeterHeight = 14f;
+
+    private void DrawTorchHeatMeter()
+    {
+        if (_heldObject == null) return;
+
+        var tool = _heldObject.GetComponent<ToolItem>();
+        if (tool == null || tool.Type != ToolType.Torch) return;
+
+        var fuel = _heldObject.GetComponent<WeldingTorchFuel>();
+        if (fuel == null) return;
+
+        var area = new Rect(Screen.width * 0.5f - HeatMeterWidth * 0.5f, Screen.height * 0.5f + 40f,
+            HeatMeterWidth, HeatMeterHeight);
+
+        GUI.Box(area, "");
+        GUI.color = fuel.IsOverheated ? Color.red : Color.Lerp(Color.green, Color.red, fuel.HeatFraction);
+        GUI.DrawTexture(new Rect(area.x, area.y, area.width * fuel.HeatFraction, area.height), Texture2D.whiteTexture);
+        GUI.color = Color.white;
+        GUI.Label(new Rect(area.x, area.y - 16f, area.width, 16f), fuel.IsOverheated ? "Overheated" : "Torch Heat");
     }
 
     // -------------------------------------------------------------------------
@@ -838,6 +963,11 @@ public class PlayerInteraction : NetworkBehaviour
         // If this player disconnects while holding something, drop it cleanly
         if (_heldObject != null && IsServer)
             _heldObject.RequestDropServerRpc(Vector3.zero);
+
+        // Likewise, release a secondary carry binding so the primary doesn't stay stuck
+        // "shared" (and penalty-free) with a carrier who's no longer there.
+        if (_boundCarry != null && IsServer)
+            _boundCarry.RequestUnbindSecondaryRpc(OwnerClientId);
 
         ClearGhostTint();
         ClearOutlineHighlight();
