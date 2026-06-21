@@ -59,6 +59,13 @@ public class PlayerInteraction : NetworkBehaviour
     private BuildTile             _lastGhostTarget;
     private Renderer              _lastOutlineTarget;
 
+    // Reused every frame for the interact raycast -- a TwoPersonCarry item's main body
+    // collider geometrically overlaps its TwoPersonCarryPoint colliders (it still needs to
+    // exist for world physics even though it's no longer a valid pickup target), so a
+    // single closest-hit raycast isn't enough; ResolveInteractHit needs every hit in range
+    // to skip past the body collider to an attach point behind it.
+    private readonly RaycastHit[] _interactRaycastBuffer = new RaycastHit[16];
+
     private void Awake()
     {
         _input = GetComponent<InputReader>();
@@ -72,9 +79,9 @@ public class PlayerInteraction : NetworkBehaviour
         ReconcileCarryHandoff();
         MoveHeldObject();
 
-        Physics.Raycast(new Ray(playerCamera.transform.position, playerCamera.transform.forward),
-            out RaycastHit hit, interactRange);
-        Collider hitCollider = hit.collider;
+        int hitCount = Physics.RaycastNonAlloc(new Ray(playerCamera.transform.position, playerCamera.transform.forward),
+            _interactRaycastBuffer, interactRange);
+        Collider hitCollider = ResolveInteractHit(hitCount);
 
         BuildTile        tileTarget   = hitCollider != null ? hitCollider.GetComponentInParent<BuildTile>()        : null;
         PhysicsPickup    pickupTarget = hitCollider != null ? hitCollider.GetComponentInParent<PhysicsPickup>()    : null;
@@ -108,6 +115,34 @@ public class PlayerInteraction : NetworkBehaviour
         HandleKioskMenuSelection();
         HandleTerminalMenuSelection();
         HandleTerminalConfirm();
+    }
+
+    /// <summary>Closest raycast hit within range, skipping a TwoPersonCarry item's own
+    /// non-attach-point colliders. Steel's main body BoxCollider overlaps both of its
+    /// TwoPersonCarryPoint colliders (it spans the item's full length for world physics,
+    /// same as its attach points' outer halves) -- since it can never be picked up directly,
+    /// it shouldn't be able to win a closest-hit check and block the ray from reaching an
+    /// attach point sitting behind/inside it.</summary>
+    private Collider ResolveInteractHit(int hitCount)
+    {
+        Collider best = null;
+        float bestDistance = float.MaxValue;
+
+        for (int i = 0; i < hitCount; i++)
+        {
+            RaycastHit candidate = _interactRaycastBuffer[i];
+            if (candidate.distance >= bestDistance) continue;
+
+            Collider collider = candidate.collider;
+            if (collider.GetComponentInParent<TwoPersonCarryPoint>() == null &&
+                collider.GetComponentInParent<TwoPersonCarry>() != null)
+                continue;
+
+            best = collider;
+            bestDistance = candidate.distance;
+        }
+
+        return best;
     }
 
     // -------------------------------------------------------------------------
@@ -251,29 +286,45 @@ public class PlayerInteraction : NetworkBehaviour
     {
         if (_heldObject == null) return;
 
-        // Shared carry (TwoPersonCarry.IsShared): average both carriers' body-root-derived
-        // carry points instead of snapping to our own holdPoint. We're the owner here (the
-        // other holder never sets _heldObject -- see _boundCarry), and as the PhysicsPickup's
-        // NetworkObject owner we're the only one whose ClientNetworkTransform write actually
-        // replicates -- so this still has to run on our machine even though half the input
-        // is the other player's transform.
+        // Both branches below position/orient via TwoPersonCarry instead of snapping to our
+        // own holdPoint. We're the owner here (a non-owner shared carrier never sets
+        // _heldObject -- see _boundCarry), and as the PhysicsPickup's NetworkObject owner
+        // we're the only one whose ClientNetworkTransform write actually replicates -- so
+        // this still has to run on our machine even when shared, where half the input is the
+        // other player's transform.
         var carry = _heldObject.GetComponent<TwoPersonCarry>();
-        if (carry != null && carry.IsShared)
+        if (carry != null)
         {
-            Transform otherBody = TwoPersonCarry.GetCarrierBodyTransform(carry.OtherHolder(OwnerClientId));
-            if (otherBody != null)
+            if (carry.IsShared)
             {
-                Vector3 midpoint = (carry.CarryPointFor(transform) + carry.CarryPointFor(otherBody)) * 0.5f;
+                Transform otherBody = TwoPersonCarry.GetCarrierBodyTransform(carry.OtherHolder(OwnerClientId));
+                if (otherBody != null)
+                {
+                    Vector3 midpoint = (carry.CarryPointFor(transform) + carry.CarryPointFor(otherBody)) * 0.5f;
 
-                // Orientation comes from the line between the two carriers' raw body
-                // positions, never from either carrier's forward/facing vector -- stable
-                // while either player turns their view in place (PlayerCamera rotates the
-                // body on mouse-look yaw independent of movement), unlike the old
-                // forward-vector-sum approach which spun the held item with the camera.
-                Vector3 axis = otherBody.position - transform.position;
-                axis.y = 0f;
-                Quaternion rotation = axis.sqrMagnitude > 0.0001f ? Quaternion.LookRotation(axis) : _heldObject.transform.rotation;
-                _heldObject.transform.SetPositionAndRotation(midpoint, rotation);
+                    // Orientation comes from the line between the two carriers' raw body
+                    // positions, never from either carrier's forward/facing vector -- stable
+                    // while either player turns their view in place (PlayerCamera rotates the
+                    // body on mouse-look yaw independent of movement), unlike the old
+                    // forward-vector-sum approach which spun the held item with the camera.
+                    Vector3 axis = otherBody.position - transform.position;
+                    axis.y = 0f;
+                    Quaternion rotation = axis.sqrMagnitude > 0.0001f ? carry.OrientationFor(axis) : _heldObject.transform.rotation;
+                    _heldObject.transform.SetPositionAndRotation(midpoint, rotation);
+                    return;
+                }
+            }
+            else
+            {
+                // Solo carry of a two-person item still needs carry.OrientationFor, not the
+                // generic holdPoint snap below -- that snap sets rotation = holdPoint.rotation
+                // outright, which assumes the held item is modeled "forward-facing" along
+                // local Z. Steel's long axis is local X (root scale {1.87, 1, 1}), so that
+                // snap pointed the beam out to the side of the camera instead of forward.
+                Vector3 facing = transform.forward;
+                facing.y = 0f;
+                Quaternion rotation = facing.sqrMagnitude > 0.0001f ? carry.OrientationFor(facing) : _heldObject.transform.rotation;
+                _heldObject.transform.SetPositionAndRotation(carry.CarryPointFor(transform), rotation);
                 return;
             }
         }

@@ -1658,3 +1658,96 @@ in this codebase is driven.
   automatically loses generic body-collider pickup — intentional (it's meant to force use of
   the attach points), but flagging in case a future Heavy material wants solo-only carry
   without needing two attach points at all (not requested, just noting the coupling).
+
+---
+
+## 2026-06-21 (third pass) — Two-Person Carry: wrong rotation axis + missing pickup prompt
+
+**Context from Cameron:** wired both `TwoPersonCarryPoint`s onto `Steel.prefab` himself and
+playtested the symmetric redesign for the first time. Reported: "got it to work once but it
+doesn't really work. 1) when one player picks it up first, the prefab rotates from a
+different angle than where the hold point was. also the player doesn't really seem to be
+getting a prompt to pick it up. i dont see the text you were referring to. check main."
+
+### Investigation
+
+Checked `main` first per Cameron's instruction, to rule out a wiring mistake before touching
+code again. Read `Steel.prefab` directly (`git show`/`git diff` against the wiring commit):
+root `Steel` (`m_LocalScale {1.87, 1, 1}`, `BoxCollider size {1,1,1}`), `Point1`
+(`localPosition {0.444, 0, 0}`, `BoxCollider size {0.4,1,1}`, `pointIndex 0`), `Point2`
+(`localPosition {-0.445, 0, 0}`, same collider size, `pointIndex 1`). Wiring is correct as
+authored — `pointIndex`, positions, and the `carry` fileID references all check out. Both
+bugs are pre-existing code bugs surfaced by Cameron's first real playtest of solo carry and
+of the post-redesign attach points, not wiring mistakes.
+
+**Bug 1 root cause — wrong rotation axis.** `Steel.prefab`'s visible long axis is local
+**+X** (root scale `{1.87, 1, 1}`, `Cube` child scale `{1, 0.3, 1}`), but both the generic
+`PhysicsPickup` holdPoint snap (`SetPositionAndRotation(holdPoint.position,
+holdPoint.rotation)`, used for solo carry) and the shared-carry `Quaternion.LookRotation`
+call assume local **+Z** is the item's long axis — `LookRotation` always points local +Z at
+its target direction. Confirmed via `git diff` that the holdPoint snap predates this whole
+feature, so the solo-carry case is a latent bug only now surfaced by Cameron's first solo
+playtest, not a regression; the shared-carry `LookRotation` mismatch is likewise inherited
+from the original (pre-redesign) implementation, never caught because shared carry hadn't
+been playtested before either.
+
+**Bug 2 root cause — overlapping colliders, ambiguous raycast.** In root-local units, the
+root `BoxCollider` spans local X `[-0.5, 0.5]`; each `TwoPersonCarryPoint`'s `BoxCollider`
+spans `[0.244, 0.644]` (and the mirror on the other side). Both colliders share identical
+Y/Z half-extents, so across the overlap region `[0.244, 0.5]` their front faces coincide
+almost exactly — `Physics.Raycast`'s single-closest-hit resolution becomes effectively a
+coin flip there between the root collider (no longer a valid pickup target post-redesign)
+and the attach point behind/inside it. Explains "got it to work once": reliable hits only
+happened past the overlap, near the very tip of each attach point.
+
+### What changed
+
+**Carry-axis fix.** Added `TwoPersonCarry.carryAxisLocal` (`[SerializeField] Vector3`,
+default `Vector3.right` — already correct for Steel, no Editor change needed) and
+`OrientationFor(Vector3 horizontalDirection)` using `Quaternion.FromToRotation
+(carryAxisLocal, horizontalDirection)` instead of `LookRotation` (aligns the configured axis
+to the target direction with minimal rotation, rather than always aligning local +Z).
+`PlayerInteraction.MoveHeldObject()` restructured to call this for both branches: solo carry
+orients off the carrier's flattened `transform.forward`; shared carry orients off the
+flattened line between both carriers' body positions (unchanged from the prior session's
+position-based-rotation fix, just routed through `OrientationFor` now instead of
+`LookRotation` directly). Both inputs are pre-flattened to `y = 0`, so the resulting rotation
+is guaranteed to be a pure yaw (no roll/pitch introduced).
+
+**Raycast occlusion fix.** `PlayerInteraction` gained a reused `RaycastHit[16]` buffer field
+and replaced the single `Physics.Raycast` call in `Update()` with `Physics.RaycastNonAlloc`
++ a new `ResolveInteractHit(int hitCount)` that picks the closest hit while skipping any
+collider that resolves to a `TwoPersonCarry` without also resolving to a
+`TwoPersonCarryPoint` — i.e. it can skip Steel's root body collider but never an attach
+point. Confirmed by grep that `.collider` was the only `RaycastHit` field used anywhere else
+in the file, so returning a bare `Collider` from the resolver is a safe, complete refactor
+with no behavior change for any other interactable (BuildTile, OrderStation, generic
+PhysicsPickup, etc. never resolve to a `TwoPersonCarry` and so are never filtered).
+
+Both fixes are pure C# — no further Editor/wiring action needed from Cameron.
+
+### Changes made this session
+
+- `Assets/Scripts/TwoPersonCarry.cs` — added `carryAxisLocal` field and `OrientationFor`.
+- `Assets/Scripts/PlayerInteraction.cs` — added `_interactRaycastBuffer`, replaced the
+  interact raycast with `RaycastNonAlloc` + new `ResolveInteractHit`, restructured
+  `MoveHeldObject()`'s solo and shared branches to orient via `TwoPersonCarry.OrientationFor`
+  instead of the generic holdPoint-rotation snap / raw `LookRotation`.
+- `docs/ARCHITECTURE.md` — Materials/Steel paragraph updated (both attach points confirmed
+  wired, wiring doc reference removed); two new subsections ("Carry-axis orientation fix",
+  "Attach-point raycast occlusion fix") added under the two-person-carry writeup; the
+  "Unverified" note rewritten to describe this round's findings instead of the now-resolved
+  "needs a second attach point" state.
+- `docs/SESSION.md` — this entry.
+
+### Open items for Cameron to review
+
+- **Still not compiled, no Unity Editor available this session either.** Both fixes were
+  hand-verified by direct read and hand-reasoning about Unity's collider-overlap and
+  quaternion math only. Please re-test: solo carry now visibly orients along the beam's
+  actual long axis from either attach point; the pickup prompt shows reliably at both attach
+  points (not just near the tip); shared carry, handoff-on-release, max-share-distance, and
+  the no-spin-while-stationary fix from the prior round all still behave as expected with the
+  axis fix layered on top.
+- `maxShareDistance` (4, still the script default) remains an unvalidated placeholder per the
+  prior round's note — no new information on tuning this round.

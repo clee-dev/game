@@ -326,6 +326,57 @@ thin wrapper on `NetworkManager.Singleton.SpawnManager.GetPlayerNetworkObject`).
   keeps carrying solo and regains the weight penalty; the other player simply
   "lets go" with no explicit input needed.
 
+**Carry-axis orientation fix (found after Cameron wired both `Steel.prefab`
+attach points and playtested the redesign).** Both the shared-rotation code
+above and the generic `PhysicsPickup` holdPoint snap implicitly assumed a
+held item's long axis is local +Z — true for compact, "forward-facing" props,
+false for `Steel.prefab`, whose root is scaled `{1.87, 1, 1}` (long axis is
+local +X). Solo carry fell straight through to the generic
+`_heldObject.transform.SetPositionAndRotation(holdPoint.position,
+holdPoint.rotation)` snap, which pointed the beam out to the side of the
+camera instead of forward — visually "rotated from a different angle than
+where the hold point was." Fixed with an explicit
+`TwoPersonCarry.carryAxisLocal` (`[SerializeField] Vector3`, default
+`Vector3.right` — already correct for Steel without any Editor change) and a
+new `TwoPersonCarry.OrientationFor(Vector3 horizontalDirection)` helper
+(`Quaternion.FromToRotation(carryAxisLocal, horizontalDirection)`, a pure
+yaw rotation since both vectors are flattened/horizontal). `MoveHeldObject()`
+now branches on `carry != null` first, then `IsShared`:
+- **Shared** — unchanged positioning (carrier-point midpoint), but rotation
+  now uses `carry.OrientationFor(axis)` instead of
+  `Quaternion.LookRotation(axis)`, so the beam's actual long axis lies along
+  the line between the two carriers (LookRotation would have pointed local
+  +Z along that line instead, leaving the visible length perpendicular to it
+  — a latent bug never caught because shared carry hadn't been playtested
+  yet either).
+- **Solo** (new branch) — position is `carry.CarryPointFor(transform)` (same
+  helper shared carry already used), rotation is
+  `carry.OrientationFor(transform.forward)` flattened — tracks the carrier's
+  facing (yaw only, matching `PlayerCamera`'s body-yaw/camera-pitch split) so
+  the beam swings naturally when the carrier turns, without picking up
+  camera pitch.
+
+**Attach-point raycast occlusion fix (found in the same playtest round).**
+Cameron also reported the `[E] Pick Up` prompt rarely appearing over the
+beam at all. Root cause: `Steel.prefab`'s main `BoxCollider` (root, size
+`{1,1,1}`, spans local X `±0.5`) geometrically overlaps both
+`TwoPersonCarryPoint` colliders (`{0.4,1,1}` centered at local X `±0.444`,
+spanning local X `0.244–0.644`/`-0.244 to -0.644`) — the overlap region is
+`0.244–0.5` (and its mirror). The old single-hit `Physics.Raycast` returns
+whichever overlapping collider is geometrically closest along the ray, which
+in that overlap zone is frequently the root's (pickup-disabled, post-redesign)
+collider rather than the attach point — only aiming past the overlap, at the
+very tip beyond local X `0.5`, reliably hit the attach point alone. Fixed in
+`PlayerInteraction.Update()`: the single `Physics.Raycast` call is now
+`Physics.RaycastNonAlloc` into a reused 16-slot `RaycastHit[]` buffer, fed
+through a new `ResolveInteractHit(hitCount)` that picks the closest hit
+*after* skipping any collider that resolves to a `TwoPersonCarry` but not a
+`TwoPersonCarryPoint` — i.e. the root body collider can no longer block the
+ray from reaching an attach point sitting behind/inside it. No behavior
+change for any other interactable (nothing else gets filtered, so the
+closest-hit result is identical whenever the closest hit isn't a
+TwoPersonCarry body collider).
+
 **Welding Torch heat meter (`DrawTorchHeatMeter`, this session).** `OnGUI`
 draws a small heat bar centered low on screen whenever the locally held item
 has both a `ToolItem` of type `Torch` and a `WeldingTorchFuel`, lerping
@@ -355,19 +406,16 @@ default, not a design call, in case Cameron wants a velocity-based feel instead.
 Currently implemented:
 - **Wood** — Light weight, Hammer tool, full prefab + built prefab (`WoodPlank`)
 
-**Steel — gameplay code implemented, `Steel.prefab` built by Cameron with one
-`TwoPersonCarryPoint` child (pre-dating the symmetric two-point redesign — see
-Interaction & Pickup above).** Heavy weight (`PhysicsPickup.Weight =
-WeightClass.Heavy`, 75% solo speed penalty via `PlayerController`), Welding
+**Steel — gameplay code implemented, `Steel.prefab` fully wired by Cameron
+with both `TwoPersonCarryPoint` children (`Point1`/`Point2`, `pointIndex` 0/1,
+mirrored at local X `{0.444, -0.445}`).** Heavy weight (`PhysicsPickup.Weight
+= WeightClass.Heavy`, 75% solo speed penalty via `PlayerController`), Welding
 Torch tool. First (and so far only) material to use `TwoPersonCarry` — either
 player can grab either of its two attach points; whichever is grabbed first
 (while unheld) is a solo pickup, a second player grabbing the other point
 afterward shares the carry and removes the speed penalty for both, and either
-can release independently. `Steel.prefab` still only has one
-`TwoPersonCarryPoint` child — needs a second, mirrored one before the
-redesign is fully wired in-Editor — see
-`docs/wiring/steel-two-person-carry-points.md`. No blueprint currently places
-a Steel tile/supply zone — see `docs/wiring/steel-material-and-welding-torch.md`.
+can release independently. No blueprint currently places a Steel tile/supply
+zone — see `docs/wiring/steel-material-and-welding-torch.md`.
 
 Defined but not yet implemented at all:
 - **Concrete** — Medium weight, Trowel tool (no prefab, no gameplay)
@@ -516,11 +564,37 @@ redesign above: rotation jank while a stationary carrier looked around (fixed
 by deriving rotation from carrier body *positions*, not facing direction),
 no maximum carry distance (fixed with a server-side `maxShareDistance` check),
 and a request for fully interchangeable hold points instead of a fixed
-primary/secondary split (the two-point redesign itself). None of the new code
-has been playtested yet — `Steel.prefab` still needs a second
-`TwoPersonCarryPoint` child added before it can be — see
-`docs/wiring/steel-two-person-carry-points.md`. Once that's wired, please
-confirm: either point can start a solo carry (slows movement to 25%);
+primary/secondary split (the two-point redesign itself).
+
+Cameron then wired both `TwoPersonCarryPoint` children onto `Steel.prefab`
+(`Point1`/`Point2`, confirmed correct by reading the `main` branch directly —
+not a wiring problem) and playtested the redesign itself, reporting two new
+issues, both root-caused by direct read/hand-reasoning (still no Editor) and
+fixed in code only, no further wiring needed:
+- **Wrong rotation axis.** `Steel.prefab`'s long axis is local **+X** (root
+  `m_LocalScale {1.87, 1, 1}`), but the generic `PhysicsPickup` holdPoint snap
+  and the shared-carry `Quaternion.LookRotation` both implicitly assumed local
+  **+Z**. Fixed by adding `TwoPersonCarry.carryAxisLocal` (defaults to
+  `Vector3.right`, already correct for Steel) and `OrientationFor`
+  (`Quaternion.FromToRotation(carryAxisLocal, horizontalDirection)`), used by
+  `PlayerInteraction.MoveHeldObject()` for both the solo and shared branches
+  instead of the old holdPoint-rotation snap / `LookRotation` call.
+- **Missing pickup prompt.** Steel's root `BoxCollider` (`size {1,1,1}`,
+  spans local X `[-0.5, 0.5]`) geometrically overlaps each
+  `TwoPersonCarryPoint`'s `BoxCollider` (`size {0.4,1,1}`, centered at local X
+  `±0.444`) across local X `[0.244, 0.5]` (and its mirror) — both share
+  identical Y/Z half-extents, so their front faces coincide almost exactly in
+  that zone, making Unity's single-hit `Physics.Raycast` pick whichever
+  collider it felt like (explains "got it to work once": only reliable past
+  the overlap, near the very tip). Fixed by replacing the single raycast in
+  `PlayerInteraction.Update()` with `Physics.RaycastNonAlloc` into a reused
+  buffer plus a new `ResolveInteractHit` that takes the closest hit while
+  skipping any collider that resolves to a `TwoPersonCarry` without also
+  resolving to a `TwoPersonCarryPoint` — i.e. skips the root body collider but
+  never an attach point. No behavior change for any other interactable.
+
+Please confirm on next playtest: either point can start a solo carry (slows
+movement to 25%) and now visibly orients along the beam's actual long axis;
 grabbing the other point while someone else holds it shares the carry and
 restores both to full speed; either carrier releasing independently works,
 and the owner releasing while shared hands ownership to the other carrier
@@ -528,7 +602,8 @@ instead of dropping the item (including a beam thrown across the level by the
 newly-promoted owner — verifies `ReconcileCarryHandoff` actually picked it
 up); drifting more than ~4m apart while shared auto-drops the non-owner
 side; rotating in place while stationary and sharing a carry no longer spins
-the beam. Torch burnout behavior (pause-not-reset while moving, ~8s
+the beam; the pickup prompt now shows reliably at both attach points, not
+just near the tip. Torch burnout behavior (pause-not-reset while moving, ~8s
 overheat, ~4s lockout) is unchanged from before and still unverified the
 same way.
 
