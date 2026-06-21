@@ -229,6 +229,9 @@ MonoBehaviour:
   sprintSpeed: 9
   jumpHeight: 1.2
   gravity: -15
+  playerInteraction: {fileID: 3911690637486458895}
+  mediumWeightMultiplier: 0.85
+  heavyWeightMultiplier: 0.25
 --- !u!114 &3287351102127897573
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -273,6 +276,8 @@ MonoBehaviour:
   playerCam: {fileID: 5451394608381476393}
   audioListener: {fileID: 6282553568160900946}
   playerInteraction: {fileID: 3911690637486458895}
+  passiveScenes:
+  - LevelEditor
   characterController: {fileID: 6547845995429739131}
 --- !u!114 &5074844630771936822
 MonoBehaviour:
@@ -339,6 +344,9 @@ MonoBehaviour:
   interactPrompt: {fileID: 7397480948255921066}
   interactRange: 4
   throwForce: 8
+  validGhostColor: {r: 0.2, g: 1, b: 0.3, a: 0.55}
+  invalidGhostColor: {r: 1, g: 0.2, b: 0.2, a: 0.3}
+  hoverOutlineColor: {r: 1, g: 0.9, b: 0.2, a: 1}
 --- !u!114 &8121109821628310389
 MonoBehaviour:
   m_ObjectHideFlags: 0

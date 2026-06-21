@@ -22,7 +22,7 @@ Material:
   m_PrefabAsset: {fileID: 0}
   m_Name: Lit
   m_Shader: {fileID: 4800000, guid: 6fc769af689d2f64e807e0bce1c8e367, type: 3}
-  m_Parent: {fileID: 2100000, guid: c79e0b6f03ca0a84ebda565a709b2f01, type: 2}
+  m_Parent: {fileID: 2100000, guid: d0060536fe515fa4fb76e1fb59ca2044, type: 2}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
   m_InvalidKeywords: []
@@ -36,11 +36,7 @@ Material:
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
-    m_TexEnvs:
-    - _BaseMap:
-        m_Texture: {fileID: 2800000, guid: ee8b2d1f1512d0840bf0f480ec53084c, type: 3}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
+    m_TexEnvs: []
     m_Ints: []
     m_Floats: []
     m_Colors: []

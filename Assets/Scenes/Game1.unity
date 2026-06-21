@@ -2009,6 +2009,7 @@ MonoBehaviour:
   supplyZoneSpawnerPrefab: {fileID: 8069203733129338480, guid: 67a803d109c39654192a9a8cb6816b4f, type: 3}
   toolDepotSpawnerPrefab: {fileID: 8075906239925477855, guid: c2fe0e8219146cb488dc5b647053dda7, type: 3}
   orderStationPrefab: {fileID: 7618663006822850499, guid: 2d68a9aac09a16141bdd6c48bd663f4c, type: 3}
+  trashBinPrefab: {fileID: 7769460479908968147, guid: 479538cea6de8a14e99cba1993a851bc, type: 3}
 --- !u!4 &1300625215
 Transform:
   m_ObjectHideFlags: 0

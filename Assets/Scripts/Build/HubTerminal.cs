@@ -213,7 +213,7 @@ public class HubTerminal : NetworkBehaviour
             pixels[pz * width + px] = TileTypeColors.ColorFor(type);
         }
 
-        tex.Resize(width, height);
+        tex.Reinitialize(width, height);
         tex.SetPixels(pixels);
         tex.Apply();
         return tex;

@@ -127,6 +127,7 @@ GameObject:
   - component: {fileID: 7457676030516436619}
   - component: {fileID: 1945162110774385777}
   - component: {fileID: 3289289382423367029}
+  - component: {fileID: 628176571643490275}
   m_Layer: 0
   m_Name: Welding Torch
   m_TagString: Untagged
@@ -282,6 +283,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PhysicsPickup
   ShowTopMostFoldoutHeaderGroup: 1
+  weightClass: 0
+  fallDespawnY: -40
 --- !u!114 &3289289382423367029
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -296,3 +299,19 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::ToolItem
   ShowTopMostFoldoutHeaderGroup: 1
   toolType: 2
+--- !u!114 &628176571643490275
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8421532194043222775}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6babf256d1d64397997ab83aedeccb44, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::WeldingTorchFuel
+  ShowTopMostFoldoutHeaderGroup: 1
+  maxHeat: 8
+  drainRate: 1
+  cooldownDuration: 4
