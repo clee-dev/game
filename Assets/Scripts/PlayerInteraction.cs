@@ -35,7 +35,8 @@ public class PlayerInteraction : NetworkBehaviour
     [SerializeField] private Color invalidGhostColor = new(1f,   0.2f, 0.2f, 0.30f);
     [SerializeField] private Color hoverOutlineColor = new(1f,   0.9f, 0.2f, 1f);
 
-    private InputReader      _input;
+    private InputReader        _input;
+    private CharacterController _characterController;
     private PhysicsPickup    _heldObject;
     private OrderStation     _openOrderMenuTarget;
     private LevelSelectKiosk _openKioskMenuTarget;
@@ -54,6 +55,12 @@ public class PlayerInteraction : NetworkBehaviour
     // at which point _boundCarry clears and _heldObject takes over.
     private TwoPersonCarry _boundCarry;
 
+    // Whichever PhysicsPickup we're currently ignoring collision against our own
+    // CharacterController for -- see SyncHeldCollisionIgnore. Change-detected the same way
+    // as _lastGhostTarget/_lastOutlineTarget below, so every transition (pickup, drop, bind,
+    // unbind, handoff) is covered by one check instead of editing every call site.
+    private PhysicsPickup _collisionIgnoreTarget;
+
     // Reused every frame for MaterialPropertyBlock writes -- never allocate one in Update.
     private MaterialPropertyBlock _mpb;
     private BuildTile             _lastGhostTarget;
@@ -69,6 +76,7 @@ public class PlayerInteraction : NetworkBehaviour
     private void Awake()
     {
         _input = GetComponent<InputReader>();
+        _characterController = GetComponent<CharacterController>();
         _mpb = new MaterialPropertyBlock();
     }
 
@@ -77,6 +85,7 @@ public class PlayerInteraction : NetworkBehaviour
         if (!IsOwner) return;
 
         ReconcileCarryHandoff();
+        SyncHeldCollisionIgnore();
         MoveHeldObject();
 
         int hitCount = Physics.RaycastNonAlloc(new Ray(playerCamera.transform.position, playerCamera.transform.forward),
@@ -286,12 +295,12 @@ public class PlayerInteraction : NetworkBehaviour
     {
         if (_heldObject == null) return;
 
-        // Both branches below position/orient via TwoPersonCarry instead of snapping to our
-        // own holdPoint. We're the owner here (a non-owner shared carrier never sets
-        // _heldObject -- see _boundCarry), and as the PhysicsPickup's NetworkObject owner
-        // we're the only one whose ClientNetworkTransform write actually replicates -- so
-        // this still has to run on our machine even when shared, where half the input is the
-        // other player's transform.
+        // TwoPersonCarry items never snap to our own holdPoint. We're the owner here (a
+        // non-owner shared carrier never sets _heldObject -- see _boundCarry), and as the
+        // PhysicsPickup's NetworkObject owner we're the only one whose ClientNetworkTransform
+        // write actually replicates -- so the shared branch below still has to run on our
+        // machine even though half its input is the other player's transform. Solo carry sets
+        // nothing here at all -- see the branch below.
         var carry = _heldObject.GetComponent<TwoPersonCarry>();
         if (carry != null)
         {
@@ -316,15 +325,10 @@ public class PlayerInteraction : NetworkBehaviour
             }
             else
             {
-                // Solo carry of a two-person item still needs carry.OrientationFor, not the
-                // generic holdPoint snap below -- that snap sets rotation = holdPoint.rotation
-                // outright, which assumes the held item is modeled "forward-facing" along
-                // local Z. Steel's long axis is local X (root scale {1.87, 1, 1}), so that
-                // snap pointed the beam out to the side of the camera instead of forward.
-                Vector3 facing = transform.forward;
-                facing.y = 0f;
-                Quaternion rotation = facing.sqrMagnitude > 0.0001f ? carry.OrientationFor(facing) : _heldObject.transform.rotation;
-                _heldObject.transform.SetPositionAndRotation(carry.CarryPointFor(transform), rotation);
+                // Solo carry is physically simulated by TwoPersonCarry itself now (a
+                // ConfigurableJoint pins the grabbed point to a local anchor it drives every
+                // frame, rotation left free so gravity drags the unclaimed end down) -- nothing
+                // to snap here. See TwoPersonCarry.UpdateSoloPhysicsDrag.
                 return;
             }
         }
@@ -332,6 +336,33 @@ public class PlayerInteraction : NetworkBehaviour
         // Snap the held object to the hold point each frame.
         // Since we own the object, ClientNetworkTransform syncs this to other clients.
         _heldObject.transform.SetPositionAndRotation(holdPoint.position, holdPoint.rotation);
+    }
+
+    /// <summary>Keeps our own CharacterController from colliding with whatever we're
+    /// currently carrying (solo via _heldObject, or bound-in via _boundCarry). Without this,
+    /// a held item snapped to a fixed carry point every frame can end up deeply overlapping
+    /// our own capsule -- Steel's box collider (root scale {1.87, 1, 1}) extends well past
+    /// TwoPersonCarry's forwardOffset (0.6) back into the carrier's own body -- and
+    /// CharacterController.Move()'s overlap depenetration then shoves us out (visibly,
+    /// straight up) every single frame the overlap persists. Generic holdPoint-snapped items
+    /// (Wood/Concrete) sit far enough out not to trigger this, but the fix is applied
+    /// uniformly rather than special-cased to Heavy/TwoPersonCarry items.</summary>
+    private void SyncHeldCollisionIgnore()
+    {
+        PhysicsPickup current = _heldObject != null ? _heldObject : _boundCarry?.Pickup;
+        if (current == _collisionIgnoreTarget) return;
+
+        SetCollisionIgnore(_collisionIgnoreTarget, false);
+        SetCollisionIgnore(current, true);
+        _collisionIgnoreTarget = current;
+    }
+
+    private void SetCollisionIgnore(PhysicsPickup item, bool ignore)
+    {
+        if (item == null || _characterController == null) return;
+
+        foreach (Collider col in item.GetComponentsInChildren<Collider>())
+            Physics.IgnoreCollision(col, _characterController, ignore);
     }
 
     /// <summary>Promotes a bound co-carrier to full holder after an ownership handoff (the

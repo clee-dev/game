@@ -377,6 +377,64 @@ change for any other interactable (nothing else gets filtered, so the
 closest-hit result is identical whenever the closest hit isn't a
 TwoPersonCarry body collider).
 
+**Carrier self-collision fix (Cameron reported "when I pick up steel ... I get
+intersected with the object and I just fly up instantly").** Root cause:
+`TwoPersonCarry.CarryPointFor` places the beam only `forwardOffset` (0.6) in
+front of the carrier's body root, but Steel's `BoxCollider` extends `0.935`
+past the carry point along its long axis once oriented forward (root scale
+`{1.87, 1, 1}`, collider size `{1, 1, 1}`) — the near end lands `~0.335` units
+*behind* the carrier's own position, deep inside their `CharacterController`
+capsule (radius `0.4`). Since the held body is kinematic and re-snapped to
+that overlapping position every frame, `CharacterController.Move()`'s
+overlap-depenetration shoved the player straight up out of the overlap, every
+frame, for as long as the overlap persisted — reads exactly as "fly up
+instantly" on pickup. Fixed generally rather than by retuning
+`forwardOffset`/`carryAxisLocal` per item (future Heavy items would just hit
+the same problem at a different size): `PlayerInteraction` now runs
+`SyncHeldCollisionIgnore()` every `Update()`, change-detected the same way as
+`_lastGhostTarget`/`_lastOutlineTarget` — whenever the locally relevant carry
+target (`_heldObject ?? _boundCarry?.Pickup`) changes, it calls
+`Physics.IgnoreCollision` between every `Collider` on that item
+(`GetComponentsInChildren<Collider>()`, covering the root body collider and
+both `TwoPersonCarryPoint` colliders) and our own cached `CharacterController`,
+clearing the previous target's ignore pair first. Applies uniformly to every
+`PhysicsPickup`, not just `TwoPersonCarry` items — Wood/Concrete's generic
+holdPoint snap sits far enough out not to have triggered this, but there's no
+reason carrying them should ever collide with their own carrier either.
+
+**Solo carry physics drag (Cameron's follow-up request: "I want there to be
+physics on the object so that when one player picks it up, it drags on the
+other side... so other players can pick it up").** Solo carry (exactly one
+`TwoPersonCarryPoint` claimed) is no longer a rigid kinematic snap —
+`TwoPersonCarry.FixedUpdate()` → `UpdateSoloPhysicsDrag()` keeps the
+`Rigidbody` non-kinematic and pins the grabbed point to a local-only kinematic
+anchor (`_carryAnchor`, a `HideAndDontSave` `GameObject` + `Rigidbody`, never
+networked — every client builds and drives its own from the same replicated
+holder-body math `CarryPointFor` already used) via a `ConfigurableJoint`:
+linear motion `Locked` (the grabbed point follows the anchor exactly),
+angular motion `Free` (no resistance to rotation), so gravity swings the
+unclaimed end down to dangle near the ground — close enough for a second
+player to grab its other attach point and bind in as the shared co-carrier.
+`soloAngularDamping` (`[SerializeField]`, default `3`) replaces the
+Rigidbody's much-lower default damping (`0.05`) only while solo-dragging, so
+the swing settles instead of oscillating indefinitely; restored the instant
+solo carry ends.
+
+Runs identically on every client (not gated to `IsOwner`/`IsServer`), the same
+"simulate locally everywhere, trust the owner's `ClientNetworkTransform`
+write as authoritative" pattern `PhysicsPickup` already relies on for thrown
+items — `PlayerInteraction.MoveHeldObject()`'s solo branch now does nothing
+at all (previously snapped position/rotation directly; physics drives it
+instead). Shared carry is untouched — still the existing rigid
+midpoint-average kinematic snap, since two carriers already fully constrain
+the item and there's nothing left to swing. Transition handling
+(`BeginSoloPhysicsDrag`/`EndSoloPhysicsDrag`): going solo→shared forces
+`isKinematic` back to `true` (shared expects the rigid snap); going
+solo→fully-released does *not* touch `isKinematic` itself, since
+`PhysicsPickup.OnHeldStateChanged` already sets it `false` for the actual
+throw — forcing it `true` here too would race that callback and cancel the
+throw velocity.
+
 **Welding Torch heat meter (`DrawTorchHeatMeter`, this session).** `OnGUI`
 draws a small heat bar centered low on screen whenever the locally held item
 has both a `ToolItem` of type `Torch` and a `WeldingTorchFuel`, lerping

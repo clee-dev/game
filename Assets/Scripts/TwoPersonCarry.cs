@@ -35,6 +35,12 @@ public class TwoPersonCarry : NetworkBehaviour
     [Header("Auto-release the non-owner carrier if they drift this far apart (server-only)")]
     [SerializeField] private float maxShareDistance = 4f;
 
+    [Header("Solo carry physics drag -- angular damping while exactly one point is held")]
+    // Default Rigidbody angularDamping (0.05) lets a freely-rotating beam swing almost
+    // forever once gravity sets it dangling -- this is restored the instant carry stops being
+    // solo (shared snap, drop, or despawn), so it never affects thrown/dropped behavior.
+    [SerializeField] private float soloAngularDamping = 3f;
+
     [Header("Local axis on this prefab that runs along the item's length")]
     // Aligned to the line between carriers when shared, or to the holder's facing when
     // solo (see OrientationFor) -- Steel.prefab is scaled long on local X (root
@@ -52,8 +58,39 @@ public class TwoPersonCarry : NetworkBehaviour
 
     public PhysicsPickup Pickup => _pickup;
     private PhysicsPickup _pickup;
+    private Rigidbody _rb;
 
-    private void Awake() => _pickup = GetComponent<PhysicsPickup>();
+    // Local-only kinematic body the solo-carry ConfigurableJoint is pinned to -- never
+    // networked (every client builds and drives its own from the same replicated holder-body
+    // math), purely a local "hand" the joint's locked linear motion follows. See
+    // UpdateSoloPhysicsDrag.
+    private Rigidbody _carryAnchor;
+    private ConfigurableJoint _joint;
+    private bool _physicsDragActive;
+    private float _originalAngularDamping;
+    private Transform _pointATransform;
+    private Transform _pointBTransform;
+
+    private void Awake()
+    {
+        _pickup = GetComponent<PhysicsPickup>();
+        _rb = GetComponent<Rigidbody>();
+
+        foreach (TwoPersonCarryPoint point in GetComponentsInChildren<TwoPersonCarryPoint>(true))
+        {
+            if (point.PointIndex == 0) _pointATransform = point.transform;
+            else _pointBTransform = point.transform;
+        }
+
+        var anchorObject = new GameObject($"{name} (Carry Anchor)") { hideFlags = HideFlags.HideAndDontSave };
+        _carryAnchor = anchorObject.AddComponent<Rigidbody>();
+        _carryAnchor.isKinematic = true;
+    }
+
+    private void OnDestroy()
+    {
+        if (_carryAnchor != null) Destroy(_carryAnchor.gameObject);
+    }
 
     public override void OnNetworkSpawn() => _pickup.HeldStateChanged += OnHeldStateChanged;
 
@@ -70,21 +107,92 @@ public class TwoPersonCarry : NetworkBehaviour
         _holderB.Value = NoHolder;
     }
 
-    // Server-only: a shared carry whose two carriers have drifted too far apart auto-drops
-    // the non-owner side rather than letting the item stretch toward an ever-widening
-    // midpoint forever. The owner keeps carrying solo and regains the weight penalty.
-    private void Update()
+    // FixedUpdate, not Update -- this drives a non-kinematic Rigidbody's joint anchor, and
+    // setting that immediately before PhysX's own fixed timestep (rather than at whatever rate
+    // Update happens to run) is what keeps the solo-drag swing smooth instead of jittery.
+    private void FixedUpdate()
     {
-        if (!IsServer || !IsShared) return;
+        // Server-only: a shared carry whose two carriers have drifted too far apart auto-drops
+        // the non-owner side rather than letting the item stretch toward an ever-widening
+        // midpoint forever. The owner keeps carrying solo and regains the weight penalty.
+        if (IsServer && IsShared)
+        {
+            ulong ownerId = OwnerClientId;
+            ulong otherId = OtherHolder(ownerId);
+            Transform ownerBody = GetCarrierBodyTransform(ownerId);
+            Transform otherBody = GetCarrierBodyTransform(otherId);
+            if (ownerBody != null && otherBody != null &&
+                Vector3.Distance(ownerBody.position, otherBody.position) > maxShareDistance)
+                ClearHolderServer(otherId);
+        }
 
-        ulong ownerId = OwnerClientId;
-        ulong otherId = OtherHolder(ownerId);
-        Transform ownerBody = GetCarrierBodyTransform(ownerId);
-        Transform otherBody = GetCarrierBodyTransform(otherId);
-        if (ownerBody == null || otherBody == null) return;
+        UpdateSoloPhysicsDrag();
+    }
 
-        if (Vector3.Distance(ownerBody.position, otherBody.position) > maxShareDistance)
-            ClearHolderServer(otherId);
+    /// <summary>
+    /// Solo carry (exactly one attach point claimed) is physically simulated instead of
+    /// snapped rigid: a ConfigurableJoint pins the grabbed point to a local-only kinematic
+    /// anchor that follows the holder every frame (linear motion locked, angular free), so
+    /// gravity swings the unclaimed end down within reach of a second player instead of it
+    /// floating perfectly level forever. Runs on every client identically (each builds its own
+    /// local anchor/joint from the same replicated holder-body math -- same pattern PhysicsPickup
+    /// already relies on for thrown items: physics simulates locally everywhere, the owner's
+    /// ClientNetworkTransform write is what's actually authoritative). Shared carry (both points
+    /// claimed) reverts to the existing rigid midpoint-average snap in
+    /// PlayerInteraction.MoveHeldObject -- two carriers already fully constrain it, nothing left
+    /// to swing.
+    /// </summary>
+    private void UpdateSoloPhysicsDrag()
+    {
+        ulong soloHolder = IsShared ? NoHolder : (_holderA.Value != NoHolder ? _holderA.Value : _holderB.Value);
+        if (soloHolder == NoHolder)
+        {
+            if (_physicsDragActive) EndSoloPhysicsDrag();
+            return;
+        }
+
+        Transform holderBody = GetCarrierBodyTransform(soloHolder);
+        if (holderBody == null) return;
+
+        if (!_physicsDragActive) BeginSoloPhysicsDrag(_holderA.Value == soloHolder ? 0 : 1);
+
+        _carryAnchor.position = CarryPointFor(holderBody);
+        _rb.isKinematic = false; // re-asserted every frame -- see BeginSoloPhysicsDrag remarks
+    }
+
+    private void BeginSoloPhysicsDrag(int grabbedPointIndex)
+    {
+        _physicsDragActive = true;
+        _originalAngularDamping = _rb.angularDamping;
+        _rb.angularDamping = soloAngularDamping;
+
+        Transform grabbedPoint = grabbedPointIndex == 0 ? _pointATransform : _pointBTransform;
+
+        _joint = gameObject.AddComponent<ConfigurableJoint>();
+        _joint.connectedBody = _carryAnchor;
+        _joint.autoConfigureConnectedAnchor = false;
+        _joint.anchor = grabbedPoint != null ? transform.InverseTransformPoint(grabbedPoint.position) : Vector3.zero;
+        _joint.connectedAnchor = Vector3.zero;
+        _joint.xMotion = ConfigurableJointMotion.Locked;
+        _joint.yMotion = ConfigurableJointMotion.Locked;
+        _joint.zMotion = ConfigurableJointMotion.Locked;
+        _joint.angularXMotion = ConfigurableJointMotion.Free;
+        _joint.angularYMotion = ConfigurableJointMotion.Free;
+        _joint.angularZMotion = ConfigurableJointMotion.Free;
+    }
+
+    private void EndSoloPhysicsDrag()
+    {
+        _physicsDragActive = false;
+        if (_joint != null) Destroy(_joint);
+        _joint = null;
+        _rb.angularDamping = _originalAngularDamping;
+
+        // Only force back to kinematic when promoted to shared (PlayerInteraction's rigid
+        // midpoint snap expects that). An actual drop/throw is handled by PhysicsPickup's own
+        // OnHeldStateChanged, which already sets isKinematic = false for the throw -- forcing
+        // it true here too would race that callback and cancel the throw.
+        if (_pickup.IsHeld) _rb.isKinematic = true;
     }
 
     public ulong HolderAt(int pointIndex) => pointIndex == 0 ? _holderA.Value : _holderB.Value;

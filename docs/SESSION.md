@@ -1982,3 +1982,165 @@ visible in this session's console from an unrelated earlier playtest).
   positioned, not visually proofed by a human — expect some retuning.
 - Crosshair, Torch heat meter, and delivery queue OnGUI overlays are still
   unconverted, flagged as a separate lower-priority follow-up.
+
+---
+
+## 2026-06-21 (Part C) — Steel pickup launches the player upward (fixed)
+
+**Context from Cameron:** "there is currently a bug when i pick up steel, it
+looks like i get intersected with the object and i just fly up instantly."
+**Live Unity Editor access (Unity MCP) this session** — diagnosed and fixed
+against the actual project, validated with `Unity_ValidateScript` and the
+live Console (no compile errors), not hand-reasoned blind like most prior
+sessions on this feature.
+
+### Root cause
+
+`TwoPersonCarry.CarryPointFor` (`Assets/Scripts/TwoPersonCarry.cs`) places a
+solo-carried beam only `forwardOffset` (0.6) in front of the carrier's body
+root. `Steel.prefab`'s `BoxCollider` (size `{1, 1, 1}`, root scale
+`{1.87, 1, 1}`) extends `0.935` past that carry point along its long axis once
+oriented forward — so the near end of the beam lands `~0.335` units *behind*
+the carrier's own root position, deep inside their own `CharacterController`
+capsule (`Player.prefab`: radius `0.4`, height `1.8`). The held body is
+kinematic and gets re-snapped to that overlapping position every single
+frame, so `CharacterController.Move()`'s built-in overlap-depenetration
+pushes the player straight up out of the overlap every frame for as long as
+it persists — exactly "intersected with the object and fly up instantly."
+Verified live: read `Player.prefab`'s `CharacterController` values and
+`Steel.prefab`'s `BoxCollider`/`TwoPersonCarry` values directly via
+`git`/file read, confirmed the overlap math, then confirmed via the Unity
+Console that the project had an active Game1 play session with prior
+`[PhysicsPickup] Dropped` log lines from Cameron's own playtest.
+
+### Fix
+
+Chose not to retune `forwardOffset`/collider size for Steel specifically —
+any future Heavy item would just hit the same problem at a different size.
+Instead, `PlayerInteraction` (`Assets/Scripts/PlayerInteraction.cs`) gained
+`SyncHeldCollisionIgnore()`, called every `Update()` right after
+`ReconcileCarryHandoff()`. It's change-detected the same way as the existing
+`_lastGhostTarget`/`_lastOutlineTarget` pattern in this same file: whenever
+the locally-relevant carry target (`_heldObject ?? _boundCarry?.Pickup`)
+changes, it clears the previous item's `Physics.IgnoreCollision` pairs and
+sets new ones between every `Collider` on the new item
+(`GetComponentsInChildren<Collider>()` — covers the root body collider and
+both `TwoPersonCarryPoint` attach-point colliders in one pass) and our own
+cached `CharacterController`. One check covers every transition (pickup,
+drop, bind, unbind, ownership handoff) without editing every call site
+individually. Applied to every `PhysicsPickup`, not just `TwoPersonCarry`
+items — Wood/Concrete's generic holdPoint snap sits far enough from the
+carrier not to have triggered this, but there's no reason carrying them
+should ever physically collide with their own carrier either.
+
+**Known pre-existing gap, not touched (out of scope for this bug):**
+`TwoPersonCarry`'s server-only `Update()` auto-releases a non-owner carrier
+who drifts past `maxShareDistance`, but nothing tells that client's
+`PlayerInteraction` to clear its local `_boundCarry` when the server forces
+this — so `SyncHeldCollisionIgnore()` would leave that player's collision
+ignore stuck on indefinitely in that specific case. This gap already existed
+before this session (the same missing reconciliation, just not noticed since
+nothing currently checks `_boundCarry` against server state outside the
+explicit unbind/handoff RPC paths). Flagging since it's adjacent to what was
+just touched, not fixing it now since it's unrelated to the reported bug.
+
+### Changes made this session
+
+- `Assets/Scripts/PlayerInteraction.cs` — `_characterController` field
+  (cached in `Awake()`), `_collisionIgnoreTarget`, `SyncHeldCollisionIgnore()`
+  / `SetCollisionIgnore()`, called from `Update()`.
+- `docs/ARCHITECTURE.md` — new "Carrier self-collision fix" paragraph under
+  the two-person-carry writeup.
+- `docs/SESSION.md` — this entry.
+
+### Open items for Cameron to review
+
+- **Validated via `Unity_ValidateScript` and the live Console (no compile
+  errors), but not played through a full pickup in this session** — please
+  pick up Steel solo and confirm no more launch-upward glitch, then confirm
+  shared two-player carry, handoff-on-release, and dropping/placing Steel all
+  still feel normal with collision now ignored against the carrier(s).
+- The pre-existing `maxShareDistance` auto-release reconciliation gap noted
+  above is unrelated to this fix but adjacent to it — worth a follow-up
+  session if it turns out to matter in practice.
+
+---
+
+## 2026-06-21 (Part D) — Steel hold-distance follow-up + solo carry physics drag
+
+**Context from Cameron:** two follow-ups in the same conversation as Part C above.
+1. After the collision fix, Steel still visually clipped into the player while held, and
+   briefly launched the player again on drop. Cameron tried adjusting `holdPoint` to fix it,
+   without success.
+2. Explicit feature request: "I want there to be physics on the object so that when one
+   player picks it up, it drags on the other side. that way other players can pick it up."
+
+### Hold-distance fix
+
+Root cause of both symptoms was the same as Part C's diagnosis, just not yet acted on:
+`TwoPersonCarry.forwardOffset` (0.6) was smaller than Steel's collider half-extent along its
+long axis (0.935), so the beam's near edge sat *behind* the carrier's own body root, well
+inside their `CharacterController` capsule (radius 0.4) — clipping while held, and a brief
+re-triggered depenetration push the instant collision was un-ignored on drop. `holdPoint`
+doesn't apply to Steel at all (it's generic-item-only; `TwoPersonCarry` items use their own
+`forwardOffset`/`heightOffset`), which is why editing it had no effect — explained this
+distinction directly to Cameron. Fixed by raising `Steel.prefab`'s `TwoPersonCarry.
+forwardOffset` from `0.6` to `1.5` (live, via `Unity_RunCommand` +
+`PrefabUtility.LoadPrefabContents`/`SaveAsPrefabAsset` — no code change), matching the
+generic `holdPoint`'s forward distance and clearing the capsule with margin.
+
+### Solo carry physics drag — implemented
+
+See `docs/ARCHITECTURE.md`'s new "Solo carry physics drag" paragraph for full detail.
+Summary: `TwoPersonCarry` gained a `FixedUpdate()`-driven `ConfigurableJoint` system —
+while exactly one attach point is claimed (solo), the `Rigidbody` stays non-kinematic and
+the grabbed point is pinned (linear `Locked`) to a local-only kinematic anchor that follows
+the holder every frame, with angular motion left `Free` so gravity swings the unclaimed end
+down within reach of a second player. `soloAngularDamping` (new field, default `3`) keeps
+the swing from oscillating forever. Shared carry is unchanged (still the existing rigid
+midpoint-average snap in `PlayerInteraction.MoveHeldObject`, which now does nothing at all
+in the solo branch — physics owns that instead).
+
+Chose `ConfigurableJoint` over a from-scratch spring/lerp approach because it's the standard
+technique for this exact "carried-at-one-point, swings under gravity" feel, and because the
+codebase already has precedent for letting physics run identically on every client and
+trusting the owner's `ClientNetworkTransform` write to correct drift (the existing thrown-item
+behavior) — so extending that same trust model to solo-carry physics needed no new
+networking concept, just the local joint/anchor machinery.
+
+**Not played, no live input-simulation available.** This session had live Unity Editor
+access (`Unity_RunCommand`/`Unity_ValidateScript`) and used it to apply the hold-distance fix
+and validate both scripts compile clean, but actually picking up and carrying Steel requires
+real player input (mouse/keyboard) that isn't available through the current tooling — the
+physics drag behavior itself is unverified by play.
+
+### Changes made this session
+
+- `Assets/Prefabs/Steel.prefab` — `TwoPersonCarry.forwardOffset` `0.6` → `1.5` (live Editor
+  edit, no code).
+- `Assets/Scripts/TwoPersonCarry.cs` — `_carryAnchor`/`_joint`/`_physicsDragActive` state,
+  `_pointATransform`/`_pointBTransform` (resolved in `Awake()`), `soloAngularDamping` field,
+  `Update()` renamed to `FixedUpdate()` and split into the existing `maxShareDistance` check
+  (still `IsServer && IsShared`-gated) plus new `UpdateSoloPhysicsDrag()` /
+  `BeginSoloPhysicsDrag()` / `EndSoloPhysicsDrag()`.
+- `Assets/Scripts/PlayerInteraction.cs` — `MoveHeldObject()`'s solo-carry branch now returns
+  immediately instead of snapping position/rotation (physics drives it instead).
+- `docs/ARCHITECTURE.md` — new "Solo carry physics drag" paragraph.
+- `docs/SESSION.md` — this entry.
+
+### Open items for Cameron to review
+
+- **Please playtest the physics drag specifically:** pick up Steel solo, confirm the
+  unclaimed end visibly swings/dangles under gravity rather than floating rigid, confirm it
+  settles (doesn't oscillate forever) within a few seconds, and confirm a second player can
+  grab the dangling end to bind in as shared carry (at which point it should snap back to the
+  existing rigid two-person behavior).
+- **`soloAngularDamping` (3) is an unvalidated placeholder** — tune in the Inspector
+  (`TwoPersonCarry` component) if the swing feels too floaty or too stiff.
+- Re-confirm the Part C hold-distance fix itself: pick up Steel solo, confirm no more visual
+  clipping into the player and no launch on drop (this should now also be reinforced by the
+  physics drag itself, since a properly-cleared `forwardOffset` means there's no overlap to
+  begin with even before the joint takes over).
+- Worth watching for: the swinging beam's attach-point colliders are still solid (not
+  triggers), so a wild swing could clip into nearby level geometry or other players —
+  unverified, no playtest possible this session.
